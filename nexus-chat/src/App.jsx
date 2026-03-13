@@ -8,6 +8,7 @@ import { ChatEditor } from './ChatEditor';
 import AuthComponent from './AuthComponent';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from './firebase'; 
+import { MyForm } from './MyForm';
 
 export default function App() {
   const [isConnected, setIsConnected] = useState(socket.connected);
@@ -66,6 +67,11 @@ export default function App() {
            <button onClick={() => setCurrentRoomId("general-chat")}>General</button>
            <button onClick={() => setCurrentRoomId("dev-team")}>Dev Team</button>
         </aside>
+        <div style={{ flex: 1 }}>
+          {/*this is where room creation should take place */}
+          {/* <MyForm setDocumentId={setCurrentRoomId} /> */}
+          <MyForm setDocumentId={setCurrentRoomId} />
+          </div>
       </main>
     </div>
   );

@@ -119,6 +119,7 @@ export function ChatEditor({ documentId }) {
                 </button>
             </form>
         </div>
+        
     );
 }
 
@@ -127,10 +128,8 @@ export function ChatEditor({ documentId }) {
 const containerStyle = {
     display: 'flex',
     flexDirection: 'column',
-    height: '85vh',
-    width: '95%',
-    maxWidth: '600px',
-    margin: '10px auto',
+    height: '100%',        // fill parent instead of fixed screen
+    width: '100%',         // take full width
     backgroundColor: '#fff',
     borderRadius: '16px',
     boxShadow: '0 10px 40px rgba(0,0,0,0.08)',
@@ -170,14 +169,13 @@ const messageAreaStyle = {
     flexDirection: 'column',
     gap: '12px'
 };
-
 const messageRowStyle = {
     display: 'flex',
     width: '100%'
 };
 
 const bubbleStyle = {
-    maxWidth: '80%',
+    maxWidth: '70%',
     padding: '12px 16px',
     fontSize: '0.95rem',
     position: 'relative',

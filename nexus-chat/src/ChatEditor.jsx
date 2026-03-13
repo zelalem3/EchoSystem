@@ -5,137 +5,111 @@ import { auth } from './firebase';
 export function ChatEditor({ documentId }) {
     const [messages, setMessages] = useState([]);
     const [input, setInput] = useState('');
-    const [activeUsers, setActiveUsers] = useState(0); 
+    const [activeUsers, setActiveUsers] = useState(0);
+    const [typingUser, setTypingUser] = useState(null);
     const scrollRef = useRef(null);
-
-    // Auto-scroll to bottom when new messages arrive
-    useEffect(() => {
-        if (scrollRef.current) {
-            scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-        }
-    }, [messages]);
+    const typingTimeoutRef = useRef(null);
 
     useEffect(() => {
-        if (!documentId) return;
+        if (!documentId || !auth.currentUser) return;
 
-        // 1. Join Room
-        socket.emit('joinRoom', documentId);
+        // Join room with User Object for persistence
+        socket.emit('joinRoom', { roomId: documentId, user: { email: auth.currentUser.email } });
 
-        // 2. Listen for dynamic user count from server
-        socket.on('userCountUpdate', (count) => {
-            setActiveUsers(count);
+        socket.on('userCountUpdate', (count) => setActiveUsers(count));
+        socket.on('userTypingUpdate', ({ email, isTyping }) => {
+            setTypingUser(isTyping ? email.split('@')[0] : null);
         });
-
-        // 3. Listen for History
-        socket.on('chatHistory', (history) => {
-            setMessages(history);
-        });
-
-        // 4. Listen for New Messages
+        socket.on('chatHistory', (history) => setMessages(history));
         socket.on('receiveMessage', (newMessage) => {
             setMessages((prev) => [...prev, newMessage]);
+            setTypingUser(null);
         });
 
-        // Cleanup on unmount or room change
         return () => {
             socket.emit('leaveRoom', documentId);
             socket.off('userCountUpdate');
+            socket.off('userTypingUpdate');
             socket.off('chatHistory');
             socket.off('receiveMessage');
         };
     }, [documentId]);
 
+    // Auto-scroll to bottom
+    useEffect(() => {
+        if (scrollRef.current) {
+            scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+        }
+    }, [messages, typingUser]);
+
+    const handleInputChange = (e) => {
+        setInput(e.target.value);
+        socket.emit('typing', { roomId: documentId, user: { email: auth.currentUser.email }, isTyping: true });
+
+        if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+        typingTimeoutRef.current = setTimeout(() => {
+            socket.emit('typing', { roomId: documentId, user: { email: auth.currentUser.email }, isTyping: false });
+        }, 2000);
+    };
+
     const handleSend = (e) => {
         e.preventDefault();
         if (!input.trim()) return;
-
-        const payload = {
-            roomId: documentId,
-            message: input,
-            user: { email: auth.currentUser.email }
-        };
-
-        socket.emit('sendMessage', payload);
+        socket.emit('sendMessage', { roomId: documentId, message: input, user: { email: auth.currentUser.email } });
         setInput('');
     };
 
     return (
         <div style={containerStyle}>
-            {/* Dynamic Header */}
             <div style={headerStyle}>
                 <div>
-                    <h3 style={{ margin: 0, fontSize: '1.1rem' }}># {documentId}</h3>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginTop: '2px' }}>
-                        <span style={{ 
-                            ...dotStyle, 
-                            backgroundColor: activeUsers > 1 ? '#10b981' : '#9ca3af' 
-                        }}></span>
+                    <h3 style={{ margin: 0 }}># {documentId}</h3>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span style={{...dotStyle, backgroundColor: activeUsers > 1 ? '#10b981' : '#9ca3af'}}></span>
                         <span style={statusTextStyle}>
-                            {activeUsers > 1 ? `${activeUsers} people online` : 'Only you are here'}
+                            {activeUsers > 1 ? `${activeUsers} online` : 'Only you'}
                         </span>
                     </div>
                 </div>
             </div>
 
-            {/* Chat Messages */}
             <div style={messageAreaStyle} ref={scrollRef}>
-                {messages.length === 0 && (
-                    <div style={{ textAlign: 'center', color: '#9ca3af', marginTop: '20px', fontSize: '0.9rem' }}>
-                        No messages yet. Start the conversation!
-                    </div>
-                )}
-                {messages.map((msg, index) => {
+                {messages.map((msg, i) => {
                     const isMe = msg.email === auth.currentUser?.email;
                     return (
-                        <div key={index} style={{ 
-                            ...messageRowStyle, 
-                            justifyContent: isMe ? 'flex-end' : 'flex-start' 
-                        }}>
+                        <div key={i} style={{ ...messageRowStyle, justifyContent: isMe ? 'flex-end' : 'flex-start' }}>
                             <div style={{ 
                                 ...bubbleStyle, 
-                                backgroundColor: isMe ? '#2563eb' : '#fff',
-                                color: isMe ? 'white' : '#1f2937',
+                                backgroundColor: isMe ? '#2563eb' : '#fff', 
+                                color: isMe ? '#fff' : '#1f2937',
                                 border: isMe ? 'none' : '1px solid #e5e7eb',
                                 borderRadius: isMe ? '16px 16px 2px 16px' : '16px 16px 16px 2px'
                             }}>
-                                {!isMe && <div style={senderStyle}>{msg.email.split('@')[0]}</div>}
+                                {!isMe && <small style={senderStyle}>{msg.email.split('@')[0]}</small>}
                                 <div style={{ wordBreak: 'break-word' }}>{msg.message}</div>
                                 <div style={{ 
                                     ...timeStyle, 
                                     color: isMe ? '#bfdbfe' : '#9ca3af' 
                                 }}>
-                                    {msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '...'}
+                                    {msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
                                 </div>
-
                             </div>
                         </div>
                     );
                 })}
-
+                {typingUser && (
+                    <div style={{ fontSize: '0.8rem', color: '#6b7280', fontStyle: 'italic', marginLeft: '10px' }}>
+                        {typingUser} is typing...
+                    </div>
+                )}
             </div>
 
-            <div>
-                <button onClick={() => socket.emit('leaveRoom', documentId)} style={{
-                    backgroundColor: '#ef4444',
-                    color: 'white',
-                    border: 'none',
-                    padding: '8px 16px',
-                    borderRadius: '8px',
-                    cursor: 'pointer',
-                    fontSize: '0.85rem',
-                    margin: '10px'
-                }}>
-                    Leave Room
-                </button>
-            </div>
-
-            {/* Input Form */}
             <form onSubmit={handleSend} style={inputWrapperStyle}>
-                <input
-                    value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    placeholder="Write a message..."
-                    style={inputStyle}
+                <input 
+                    style={inputStyle} 
+                    value={input} 
+                    onChange={handleInputChange} 
+                    placeholder="Type message..." 
                 />
                 <button type="submit" style={sendButtonStyle} disabled={!input.trim()}>
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -148,7 +122,7 @@ export function ChatEditor({ documentId }) {
     );
 }
 
-// --- STYLES ---
+// --- STYLES (Fixed Naming) ---
 
 const containerStyle = {
     display: 'flex',
@@ -211,6 +185,7 @@ const bubbleStyle = {
 };
 
 const senderStyle = {
+    display: 'block',
     fontSize: '0.75rem',
     fontWeight: '700',
     marginBottom: '4px',

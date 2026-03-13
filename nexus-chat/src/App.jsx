@@ -7,6 +7,7 @@ import { ChatEditor } from './ChatEditor';
 
 import AuthComponent from './AuthComponent';
 import { onAuthStateChanged } from 'firebase/auth';
+import { Sidebar } from './sidebar';
 import { auth } from './firebase'; 
 import { MyForm } from './MyForm';
 
@@ -15,9 +16,16 @@ export default function App() {
   const [user, setUser] = useState(null); 
   const [loading, setLoading] = useState(true);
 
-  // For testing, let's hardcode a roomId. 
-  // In a real app, you might get this from a URL or a list of rooms.
-  const [currentRoomId, setCurrentRoomId] = useState("general-chat");
+ 
+  const [currentRoomId, setCurrentRoomId] = useState("");
+  const [savedRooms, setSavedRooms] = useState([]);
+
+useEffect(() => {
+    if (user) {
+        socket.emit("getUserRooms", user.email);
+        socket.on("userRoomsList", (rooms) => setSavedRooms(rooms));
+    }
+}, [user]);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -61,15 +69,11 @@ export default function App() {
           {/* THE CHAT COMPONENT */}
           <ChatEditor documentId={currentRoomId} />
         </div>
-
-        <aside style={{ width: '200px' }}>
-           <h3>Rooms</h3>
-           <button onClick={() => setCurrentRoomId("general-chat")}>General</button>
-           <button onClick={() => setCurrentRoomId("dev-team")}>Dev Team</button>
-        </aside>
+<aside>
+          <Sidebar savedRooms={savedRooms} currentRoomId={currentRoomId} setCurrentRoomId={setCurrentRoomId} />
+</aside>
         <div style={{ flex: 1 }}>
-          {/*this is where room creation should take place */}
-          {/* <MyForm setDocumentId={setCurrentRoomId} /> */}
+         
           <MyForm setDocumentId={setCurrentRoomId} />
           </div>
       </main>

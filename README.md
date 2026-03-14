@@ -45,7 +45,6 @@ The project uses a **Relational Subcollection Pattern** to ensure users can retu
 
 ```Bash
    npm install express socket.io firebase-admin
-
 ```
 
    
@@ -61,10 +60,7 @@ Configure your firebase.js with your Web SDK keys.
 Install dependencies:
 
 ```Bash
-
 npm install socket.io-client firebase
-
-
 ```
 Start the Vite dev server:
 

@@ -1,33 +1,30 @@
-// socket.js
 import { io } from "socket.io-client";
 
-// Replace with your server URL
-const SERVER_URL = "http://localhost:5000 || https://echosystem-1.onrender.com"; 
-// Create a socket instance
+// Use an Environment Variable (best practice for Vite/React)
+// In Vercel, set VITE_SERVER_URL to your Render link
+const SERVER_URL = "https://echosystem-1.onrender.com" || "http://localhost:10000";
+
 export const socket = io(SERVER_URL, {
-  // Options (optional)
-  // autoConnect: false,  
+  transports: ["websocket", "polling"], 
+  withCredentials: true
 });
 
-
 export const connectSocket = () => {
-  socket.connect();
+  if (!socket.connected) socket.connect();
 };
 
 export const disconnectSocket = () => {
-  socket.disconnect();
+  if (socket.connected) socket.disconnect();
 };
-
 
 socket.on("connect", () => {
   console.log("Socket connected:", socket.id);
 });
 
+socket.on("connect_error", (err) => {
+  console.error("Connection Error:", err.message);
+});
+
 socket.on("disconnect", () => {
   console.log("Socket disconnected");
 });
-
-// Handle any other events as needed
-// socket.on("event-name", (data) => {
-//   console.log(data);
-// });

@@ -1,37 +1,45 @@
-import React, { useState } from 'react';
-import { 
-  getAuth, 
-  signInWithEmailAndPassword, 
-  createUserWithEmailAndPassword 
+import React, { useState } from "react";
+import {
+  getAuth,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
 } from "firebase/auth";
-import firebaseconfig from './firebase';
+import "./AuthComponent.css";
 
-function AuthComponent({setLoggedin}) {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [isSignup, setIsSignup] = useState(false); 
+function AuthComponent({ setLoggedin }) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [isSignup, setIsSignup] = useState(false);
   const [user, setUser] = useState(null);
-  const [error, setError] = useState('');
+  const [error, setError] = useState("");
 
   const handleSubmit = async (event) => {
-    event.preventDefault(); // Prevent default form submission
+    event.preventDefault();
     const auth = getAuth();
-    setError('');
+    setError("");
 
     if (!email || !password) {
-      setError('Email and password are required.');
+      setError("Email and password are required.");
       return;
     }
 
     try {
       let userCredential;
+
       if (isSignup) {
-        userCredential = await createUserWithEmailAndPassword(auth, email, password);
-        console.log("Account created!");
+        userCredential = await createUserWithEmailAndPassword(
+          auth,
+          email,
+          password
+        );
       } else {
-        userCredential = await signInWithEmailAndPassword(auth, email, password);
-        console.log("Logged in!");
+        userCredential = await signInWithEmailAndPassword(
+          auth,
+          email,
+          password
+        );
       }
+
       setUser(userCredential.user);
     } catch (err) {
       setError(err.message);
@@ -39,39 +47,57 @@ function AuthComponent({setLoggedin}) {
   };
 
   if (user) {
-   
-setLoggedin(true);
+    setLoggedin(true);
   }
 
   return (
-    <div className="App">
-      <h1>{isSignup ? 'Create Account' : 'Login'}</h1>
-      {error && <p style={{ color: 'red', fontSize: '14px' }}>{error}</p>}
-      
-      <form onSubmit={handleSubmit}>
-        <input
-          type="email"
-          placeholder="Email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-        />
-        <br />
-        <input 
-          type='password' 
-          placeholder='Password' 
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-        />
-        <br />
-        <button type="submit">
-          {isSignup ? 'Sign Up' : 'Login'}
-        </button>
-      </form>
+    <div className="auth-container">
+      <div className="auth-card">
+        <div className="logo">🔥</div>
 
-      <p style={{ marginTop: '10px', cursor: 'pointer', color: 'blue' }} 
-         onClick={() => setIsSignup(!isSignup)}>
-        {isSignup ? 'Already have an account? Login' : 'Need an account? Sign Up'}
-      </p>
+        <h1>{isSignup ? "Create Account" : "Welcome Back"}</h1>
+        <p className="subtitle">
+          {isSignup
+            ? "Create your account to get started."
+            : "Sign in to continue."}
+        </p>
+
+        {error && <div className="error">{error}</div>}
+
+        <form onSubmit={handleSubmit}>
+          <div className="input-group">
+            <label>Email</label>
+            <input
+              type="email"
+              placeholder="example@email.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+          </div>
+
+          <div className="input-group">
+            <label>Password</label>
+            <input
+              type="password"
+              placeholder="••••••••"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+          </div>
+
+          <button className="auth-btn" type="submit">
+            {isSignup ? "Create Account" : "Login"}
+          </button>
+        </form>
+
+        <div className="switch">
+          {isSignup ? "Already have an account?" : "Don't have an account?"}
+
+          <span onClick={() => setIsSignup(!isSignup)}>
+            {isSignup ? " Login" : " Sign Up"}
+          </span>
+        </div>
+      </div>
     </div>
   );
 }

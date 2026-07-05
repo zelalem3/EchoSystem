@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   getAuth,
   signInWithEmailAndPassword,
@@ -13,13 +13,20 @@ function AuthComponent({ setLoggedin }) {
   const [user, setUser] = useState(null);
   const [error, setError] = useState("");
 
-  const handleSubmit = async (event) => {
-    event.preventDefault();
+  useEffect(() => {
+    if (user) {
+      setLoggedin(true);
+    }
+  }, [user, setLoggedin]);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
     const auth = getAuth();
+
     setError("");
 
     if (!email || !password) {
-      setError("Email and password are required.");
+      setError("Please enter your email and password.");
       return;
     }
 
@@ -42,24 +49,21 @@ function AuthComponent({ setLoggedin }) {
 
       setUser(userCredential.user);
     } catch (err) {
-      setError(err.message);
+      setError(err.message.replace("Firebase:", "").trim());
     }
   };
 
-  if (user) {
-    setLoggedin(true);
-  }
-
   return (
-    <div className="auth-container">
+    <div className="auth-page">
       <div className="auth-card">
-        <div className="logo">🔥</div>
+        <h1 className="title">
+          {isSignup ? "Create your account" : "Sign in"}
+        </h1>
 
-        <h1>{isSignup ? "Create Account" : "Welcome Back"}</h1>
         <p className="subtitle">
           {isSignup
-            ? "Create your account to get started."
-            : "Sign in to continue."}
+            ? "Create an account to access your dashboard."
+            : "Welcome back. Please sign in to continue."}
         </p>
 
         {error && <div className="error">{error}</div>}
@@ -67,9 +71,10 @@ function AuthComponent({ setLoggedin }) {
         <form onSubmit={handleSubmit}>
           <div className="input-group">
             <label>Email</label>
+
             <input
               type="email"
-              placeholder="example@email.com"
+              placeholder="you@example.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
             />
@@ -77,26 +82,31 @@ function AuthComponent({ setLoggedin }) {
 
           <div className="input-group">
             <label>Password</label>
+
             <input
               type="password"
-              placeholder="••••••••"
+              placeholder="Enter your password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
             />
           </div>
 
           <button className="auth-btn" type="submit">
-            {isSignup ? "Create Account" : "Login"}
+            {isSignup ? "Create account" : "Sign in"}
           </button>
         </form>
 
-        <div className="switch">
-          {isSignup ? "Already have an account?" : "Don't have an account?"}
+        <div className="divider"></div>
+
+        <p className="switch">
+          {isSignup
+            ? "Already have an account?"
+            : "Don't have an account?"}
 
           <span onClick={() => setIsSignup(!isSignup)}>
-            {isSignup ? " Login" : " Sign Up"}
+            {isSignup ? " Sign in" : " Create one"}
           </span>
-        </div>
+        </p>
       </div>
     </div>
   );

@@ -2,15 +2,12 @@ const { createServer } = require("http");
 const { Server } = require("socket.io");
 const admin = require("firebase-admin");
 
-// 1. DYNAMIC PORT & FIREBASE LOADING
 const PORT = process.env.PORT || 10000;
 
 let serviceAccount;
 if (process.env.FIREBASE_SERVICE_ACCOUNT) {
-  // Use Render Environment Variable
   serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
 } else {
-  // Use local file for development
   serviceAccount = require("./serviceAccountKey.json");
 }
 

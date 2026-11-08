@@ -6,7 +6,6 @@ import AuthComponent from "./AuthComponent";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { Sidebar } from "./sidebar";
 import { auth } from "./firebase";
-import { MyForm } from "./MyForm";
 import { Button, Spinner, EmptyState } from "./components/ui";
 
 export default function App() {
@@ -16,6 +15,7 @@ export default function App() {
 
   const [currentRoomId, setCurrentRoomId] = useState("");
   const [savedRooms, setSavedRooms] = useState([]);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -48,6 +48,15 @@ export default function App() {
     };
   }, []);
 
+  // Close mobile sidebar on resize to desktop
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth >= 768) setSidebarOpen(false);
+    };
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
   if (loading) {
     return (
       <div className="flex h-screen items-center justify-center bg-[var(--color-bg)]">
@@ -67,26 +76,40 @@ export default function App() {
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-[var(--color-bg)] font-sans">
-      {/* LEFT SIDEBAR */}
+      {/* SIDEBAR */}
       <Sidebar
         savedRooms={savedRooms}
         currentRoomId={currentRoomId}
         setCurrentRoomId={setCurrentRoomId}
+        isOpen={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
       />
 
       {/* MAIN AREA */}
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        {/* HEADER */}
-        <header className="flex h-[60px] shrink-0 items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-surface)] px-6">
+        {/* TOP HEADER */}
+        <header className="flex h-14 shrink-0 items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4 sm:px-6">
           <div className="flex items-center gap-3">
-            <h1 className="text-lg font-bold tracking-tight text-[var(--color-text)]">
+            {/* Hamburger (mobile) */}
+            <button
+              type="button"
+              onClick={() => setSidebarOpen(true)}
+              className="rounded-md p-2 text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-secondary)] md:hidden"
+              aria-label="Open sidebar"
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
+
+            <h1 className="text-base font-bold tracking-tight text-[var(--color-text)] sm:text-lg">
               EchoSystem
             </h1>
             <ConnectionState isConnected={isConnected} />
           </div>
 
-          <div className="flex items-center gap-4">
-            <span className="hidden text-sm text-[var(--color-text-secondary)] sm:inline">
+          <div className="flex items-center gap-3">
+            <span className="hidden truncate text-sm text-[var(--color-text-secondary)] sm:inline max-w-[180px]">
               {user.email}
             </span>
             <Button variant="secondary" size="sm" onClick={() => signOut(auth)}>
@@ -95,25 +118,27 @@ export default function App() {
           </div>
         </header>
 
-        {/* CONTENT */}
-        <main className="flex flex-1 gap-5 overflow-hidden p-5">
-          {/* ROOM FORM PANEL */}
-          <div className="hidden w-[280px] shrink-0 md:block">
-            <div className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-sm">
-              <MyForm setDocumentId={setCurrentRoomId} />
-            </div>
-          </div>
-
-          {/* CHAT PANEL */}
-          <div className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-sm">
+        {/* CHAT AREA — full width */}
+        <main className="flex flex-1 overflow-hidden p-0 md:p-4">
+          <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-[var(--color-surface)] md:rounded-[var(--radius-lg)] md:border md:border-[var(--color-border)] md:shadow-sm">
             {currentRoomId ? (
               <ChatEditor documentId={currentRoomId} />
             ) : (
               <EmptyState
                 icon="💬"
                 title="No room selected"
-                description="Select a channel from the sidebar or create a new room to start chatting."
+                description="Open the sidebar and create or join a channel to start chatting."
                 className="h-full"
+                action={
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    className="md:hidden"
+                    onClick={() => setSidebarOpen(true)}
+                  >
+                    Open channels
+                  </Button>
+                }
               />
             )}
           </div>

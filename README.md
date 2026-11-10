@@ -158,7 +158,7 @@ The frontend currently prefers WebSocket and allows polling as a fallback. If th
 #### Start the Backend
 
 ```bash
-node server.js
+npm start
 ```
 
 The backend uses the port configured through `PORT`, defaulting to `10000` when no port is specified.
@@ -226,7 +226,12 @@ EchoSystem/
 │   └── package.json
 │
 ├── server/                     # Node.js + Socket.IO backend
-│   ├── server.js               # Server entry point and socket logic
+│   ├── src/
+│   │   ├── config/             # Firebase and runtime configuration
+│   │   ├── services/           # Message history and presence services
+│   │   ├── socket/             # Socket.IO event handlers
+│   │   ├── app.js              # HTTP and Socket.IO application setup
+│   │   └── index.js            # Process entry point and Redis startup
 │   ├── Dockerfile
 │   ├── package.json
 │   └── serviceAccountKey.json  # Local credentials (gitignored)

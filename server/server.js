@@ -29,6 +29,33 @@ const io = new Server(httpServer, {
 
 const roomUsers = {}; 
 
+const MESSAGE_PAGE_SIZE = 3;
+
+async function getRoomMessages(roomId, limit = MESSAGE_PAGE_SIZE, cursor = null) {
+  const messagesRef = db.collection("rooms").doc(roomId).collection("messages");
+  let query = messagesRef.orderBy("timestamp", "desc").limit(limit + 1);
+
+  if (cursor) {
+    const cursorSnapshot = await messagesRef.doc(cursor).get();
+    if (!cursorSnapshot.exists) {
+      throw new Error("Message pagination cursor was not found");
+    }
+    query = query.startAfter(cursorSnapshot);
+  }
+
+  const snapshot = await query.get();
+  const hasMore = snapshot.docs.length > limit;
+  const pageDocs = snapshot.docs.slice(0, limit);
+  const nextCursor = hasMore ? pageDocs[pageDocs.length - 1].id : null;
+
+  return {
+    messages: [...pageDocs].reverse().map((doc) => ({ id: doc.id, ...doc.data() })),
+    cursor: nextCursor,
+    hasMore,
+  };
+}
+
+
 io.on("connection", (socket) => {
   console.log("Connected:", socket.id);
 
@@ -50,11 +77,40 @@ io.on("connection", (socket) => {
     await batch.commit();
 
     try {
-      const snapshot = await db.collection("rooms").doc(roomId).collection("messages")
-        .orderBy("timestamp", "asc").get();
-      socket.emit("chatHistory", snapshot.docs.map(doc => doc.data()));
+      const page = await getRoomMessages(roomId);
+      socket.emit("chatHistory", { roomId, ...page });
     } catch (err) {
       console.error("History Error:", err);
+      socket.emit("chatHistoryError", {
+        roomId,
+        message: "Unable to load chat history.",
+      });
+    }
+  });
+
+  socket.on("loadOlderMessages", async (payload = {}) => {
+    const { roomId, cursor } = payload || {};
+    if (!roomId || !cursor || !socket.rooms.has(roomId)) return;
+
+    try {
+      const page = await getRoomMessages(roomId, MESSAGE_PAGE_SIZE, cursor);
+      socket.emit("olderChatHistory", { roomId, ...page });
+    } catch (err) {
+      console.error("Older Messages Error:", err);
+      socket.emit("chatHistoryError", {
+        roomId,
+        message: "Unable to load older messages.",
+      });
+    }
+  });
+
+  socket.on("leaveRoom", (roomId) => {
+    if (!roomId || !socket.rooms.has(roomId)) return;
+
+    socket.leave(roomId);
+    if (roomUsers[roomId]) {
+      roomUsers[roomId].delete(socket.id);
+      io.to(roomId).emit("userCountUpdate", roomUsers[roomId].size);
     }
   });
 

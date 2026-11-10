@@ -28,6 +28,10 @@ export function ChatEditor({ documentId }) {
   const [activeUsers, setActiveUsers] = useState(0);
   const [typingUser, setTypingUser] = useState(null);
   const [loadingHistory, setLoadingHistory] = useState(true);
+  const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
+  const [hasOlderMessages, setHasOlderMessages] = useState(false);
+  const [historyCursor, setHistoryCursor] = useState(null);
+  const [historyError, setHistoryError] = useState("");
   const [sending, setSending] = useState(false);
   const [isNearBottom, setIsNearBottom] = useState(true);
   const [hasNewMessages, setHasNewMessages] = useState(false);
@@ -48,26 +52,56 @@ export function ChatEditor({ documentId }) {
 
     setMessages([]);
     setLoadingHistory(true);
+    setLoadingOlderMessages(false);
+    setHasOlderMessages(false);
+    setHistoryCursor(null);
+    setHistoryError("");
     setHasNewMessages(false);
-
-    socket.emit("joinRoom", {
-      roomId: documentId,
-      user: { email: auth.currentUser.email },
-    });
 
     const onUserCount = (count) => setActiveUsers(count);
     const onTyping = ({ email, isTyping }) => {
       setTypingUser(isTyping ? email.split("@")[0] : null);
     };
-    const onHistory = (history) => {
-      setMessages(history || []);
+    const onHistory = (page) => {
+      if (!Array.isArray(page) && page?.roomId !== documentId) return;
+      const messages = Array.isArray(page) ? page : page?.messages;
+      setMessages(messages || []);
+      setHistoryCursor(Array.isArray(page) ? null : page?.cursor || null);
+      setHasOlderMessages(Boolean(!Array.isArray(page) && page?.hasMore));
       setLoadingHistory(false);
+      setHistoryError("");
       // Scroll to bottom after history loads
       requestAnimationFrame(() => {
         if (scrollRef.current) {
           scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
         }
       });
+    };
+    const onOlderHistory = (page) => {
+      if (page.roomId !== documentId) return;
+
+      const element = scrollRef.current;
+      const previousHeight = element?.scrollHeight ?? 0;
+      const previousTop = element?.scrollTop ?? 0;
+
+      setMessages((previous) => [...(page.messages || []), ...previous]);
+      setHistoryCursor(page.cursor || null);
+      setHasOlderMessages(Boolean(page.hasMore));
+      setLoadingOlderMessages(false);
+      setHistoryError("");
+
+      requestAnimationFrame(() => {
+        if (scrollRef.current) {
+          scrollRef.current.scrollTop =
+            previousTop + scrollRef.current.scrollHeight - previousHeight;
+        }
+      });
+    };
+    const onHistoryError = ({ roomId: failedRoomId, message }) => {
+      if (failedRoomId !== documentId) return;
+      setLoadingHistory(false);
+      setLoadingOlderMessages(false);
+      setHistoryError(message);
     };
     const onMessage = (newMessage) => {
       setMessages((prev) => [...prev, newMessage]);
@@ -82,16 +116,35 @@ export function ChatEditor({ documentId }) {
     socket.on("userCountUpdate", onUserCount);
     socket.on("userTypingUpdate", onTyping);
     socket.on("chatHistory", onHistory);
+    socket.on("olderChatHistory", onOlderHistory);
+    socket.on("chatHistoryError", onHistoryError);
     socket.on("receiveMessage", onMessage);
+
+    socket.emit("joinRoom", {
+      roomId: documentId,
+      user: { email: auth.currentUser.email },
+    });
 
     return () => {
       socket.emit("leaveRoom", documentId);
       socket.off("userCountUpdate", onUserCount);
       socket.off("userTypingUpdate", onTyping);
       socket.off("chatHistory", onHistory);
+      socket.off("olderChatHistory", onOlderHistory);
+      socket.off("chatHistoryError", onHistoryError);
       socket.off("receiveMessage", onMessage);
     };
   }, [documentId]);
+
+  const loadOlderMessages = () => {
+    if (!historyCursor || loadingOlderMessages) return;
+    setLoadingOlderMessages(true);
+    setHistoryError("");
+    socket.emit("loadOlderMessages", {
+      roomId: documentId,
+      cursor: historyCursor,
+    });
+  };
 
   // Auto-scroll when near bottom and new content arrives
   useEffect(() => {
@@ -225,16 +278,41 @@ export function ChatEditor({ documentId }) {
           <MessageSkeleton />
         ) : messages.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center py-12 text-center">
-            <div className="mb-3 text-3xl opacity-70">👋</div>
-            <p className="text-sm font-medium text-[var(--color-text)]">
-              No messages yet
-            </p>
-            <p className="mt-1 text-sm text-[var(--color-text-muted)]">
-              Be the first to say hello in #{documentId}
-            </p>
+            {historyError ? (
+              <p role="alert" className="text-sm text-[var(--color-danger)]">
+                {historyError}
+              </p>
+            ) : (
+              <>
+                <div className="mb-3 text-3xl opacity-70">👋</div>
+                <p className="text-sm font-medium text-[var(--color-text)]">
+                  No messages yet
+                </p>
+                <p className="mt-1 text-sm text-[var(--color-text-muted)]">
+                  Be the first to say hello in #{documentId}
+                </p>
+              </>
+            )}
           </div>
         ) : (
           <div className="space-y-0.5">
+            {hasOlderMessages && (
+              <div className="sticky top-0 z-10 flex justify-center bg-gradient-to-b from-white/90 to-transparent py-2">
+                <button
+                  type="button"
+                  onClick={loadOlderMessages}
+                  disabled={loadingOlderMessages}
+                  className="rounded-full border border-[var(--color-border)] bg-white/80 px-4 py-2 text-xs font-semibold text-[var(--color-primary)] shadow-sm transition hover:bg-[var(--color-primary-light)] disabled:cursor-wait disabled:opacity-60"
+                >
+                  {loadingOlderMessages ? "Loading older messages..." : "Load older messages"}
+                </button>
+              </div>
+            )}
+            {historyError && (
+              <p role="alert" className="py-2 text-center text-sm text-[var(--color-danger)]">
+                {historyError}
+              </p>
+            )}
             {messages.map((msg, i) => {
               const isMe = msg.email === auth.currentUser?.email;
               const first = isFirstInGroup(i);

@@ -1,8 +1,10 @@
 import { io } from "socket.io-client";
 
-// Use an Environment Variable (best practice for Vite/React)
-// In Vercel, set VITE_SERVER_URL to your Render link
-const SERVER_URL = "https://echosystem-1.onrender.com" || "http://localhost:10000";
+const SERVER_URL =
+  import.meta.env.VITE_SERVER_URL ||
+  (import.meta.env.DEV
+    ? "http://localhost:10000"
+    : "https://echosystem-1.onrender.com");
 
 export const socket = io(SERVER_URL, {
   transports: ["websocket", "polling"], 

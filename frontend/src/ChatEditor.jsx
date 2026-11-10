@@ -190,8 +190,12 @@ export function ChatEditor({ documentId }) {
   return (
     <div className="relative flex h-full flex-col overflow-hidden">
       {/* Room header */}
-      <div className="flex shrink-0 items-center justify-between border-b border-[var(--color-border)] px-5 py-3.5">
+      <div className="flex shrink-0 items-center justify-between border-b border-[var(--color-border)] bg-[linear-gradient(90deg,rgba(124,58,237,0.06),rgba(59,130,246,0.04))] px-5 py-3.5">
         <div>
+          <div className="mb-1 inline-flex items-center gap-2 rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-violet-700">
+            <span className="h-1.5 w-1.5 rounded-full bg-violet-500" />
+            Room
+          </div>
           <h3 className="text-base font-semibold text-[var(--color-text)]">
             <span className="mr-1 text-[var(--color-text-muted)]">#</span>
             {documentId}
@@ -215,7 +219,7 @@ export function ChatEditor({ documentId }) {
       <div
         ref={scrollRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto bg-[var(--color-surface-secondary)] px-4 py-4 sm:px-5"
+        className="flex-1 overflow-y-auto bg-[radial-gradient(circle_at_top,_rgba(124,58,237,0.08),_transparent_40%),_linear-gradient(180deg,rgba(248,250,255,0.9),rgba(255,255,255,0.7))] px-4 py-4 sm:px-5"
       >
         {loadingHistory ? (
           <MessageSkeleton />
@@ -269,11 +273,11 @@ export function ChatEditor({ documentId }) {
 
                       <div
                         className={`
-                          px-3.5 py-2 shadow-sm
+                          px-3.5 py-2 shadow-[0_10px_20px_-14px_rgba(76,29,149,0.45)]
                           ${
                             isMe
-                              ? "bg-[var(--color-primary)] text-white"
-                              : "border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text)]"
+                              ? "bg-gradient-to-br from-violet-600 to-indigo-600 text-white"
+                              : "border border-[var(--color-border)] bg-[rgba(255,255,255,0.92)] text-[var(--color-text)]"
                           }
                           ${
                             isMe
@@ -349,7 +353,7 @@ export function ChatEditor({ documentId }) {
       {/* Input area */}
       <form
         onSubmit={handleSend}
-        className="flex shrink-0 items-end gap-2.5 border-t border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-3 sm:px-4"
+        className="flex shrink-0 items-end gap-2.5 border-t border-[var(--color-border)] bg-[rgba(255,255,255,0.72)] px-3 py-3 sm:px-4"
       >
         <textarea
           ref={textareaRef}
@@ -362,11 +366,11 @@ export function ChatEditor({ documentId }) {
           className="
             max-h-[120px] min-h-[42px] flex-1 resize-none
             rounded-2xl border border-[var(--color-border)]
-            bg-[var(--color-surface-secondary)] px-4 py-2.5
+            bg-[rgba(248,250,255,0.9)] px-4 py-2.5
             text-sm text-[var(--color-text)]
             placeholder:text-[var(--color-text-muted)]
             transition-all duration-150
-            focus:border-[var(--color-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/20
+            focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-200/80
             disabled:opacity-60
           "
         />
@@ -375,9 +379,9 @@ export function ChatEditor({ documentId }) {
           disabled={!input.trim() || sending}
           className="
             flex h-[42px] w-[42px] shrink-0 items-center justify-center
-            rounded-full bg-[var(--color-primary)] text-white
-            shadow-sm transition-all duration-150
-            hover:bg-[var(--color-primary-hover)]
+            rounded-full bg-gradient-to-br from-violet-600 to-indigo-600 text-white
+            shadow-[0_12px_25px_-12px_rgba(109,40,217,0.9)] transition-all duration-150
+            hover:scale-[1.02] hover:shadow-[0_18px_30px_-16px_rgba(109,40,217,0.9)]
             disabled:cursor-not-allowed disabled:opacity-40
           "
           aria-label="Send message"

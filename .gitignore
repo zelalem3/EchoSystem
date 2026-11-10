@@ -2,3 +2,4 @@ nexus-chat/node_modules/
 server/node_modules/
 server/serviceAccountKey.json
 server/serviceAccountKey.json
+.env

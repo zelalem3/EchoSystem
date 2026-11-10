@@ -118,6 +118,7 @@ export function ChatEditor({ documentId }) {
     socket.on("chatHistory", onHistory);
     socket.on("olderChatHistory", onOlderHistory);
     socket.on("chatHistoryError", onHistoryError);
+    socket.on("roomError", onHistoryError);
     socket.on("receiveMessage", onMessage);
 
     socket.emit("joinRoom", {
@@ -132,6 +133,7 @@ export function ChatEditor({ documentId }) {
       socket.off("chatHistory", onHistory);
       socket.off("olderChatHistory", onOlderHistory);
       socket.off("chatHistoryError", onHistoryError);
+      socket.off("roomError", onHistoryError);
       socket.off("receiveMessage", onMessage);
     };
   }, [documentId]);

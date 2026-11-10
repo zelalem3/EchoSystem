@@ -1,5 +1,7 @@
 const { createServer } = require("http");
 const { Server } = require("socket.io");
+const { createAdapter } = require("@socket.io/redis-adapter");
+const { createClient } = require("redis");
 const admin = require("firebase-admin");
 
 const PORT = process.env.PORT || 10000;
@@ -27,9 +29,66 @@ const io = new Server(httpServer, {
   },
 });
 
-const roomUsers = {}; 
+const localRoomUsers = new Map();
+let redisClient;
 
 const MESSAGE_PAGE_SIZE = 3;
+const PRESENCE_TTL_MS = 60_000;
+const PRESENCE_HEARTBEAT_MS = 20_000;
+const PRESENCE_KEY_PREFIX = "echosystem:presence:";
+
+function getPresenceKey(roomId) {
+  return `${PRESENCE_KEY_PREFIX}${encodeURIComponent(roomId)}`;
+}
+
+async function getRoomUserCount(roomId) {
+  if (redisClient) {
+    const key = getPresenceKey(roomId);
+    await redisClient.zRemRangeByScore(key, 0, Date.now() - PRESENCE_TTL_MS);
+    const count = await redisClient.zCard(key);
+    if (count === 0) await redisClient.del(key);
+    return count;
+  }
+
+  return localRoomUsers.get(roomId)?.size || 0;
+}
+
+async function addRoomUser(roomId, socketId) {
+  if (redisClient) {
+    const key = getPresenceKey(roomId);
+    await redisClient.zAdd(key, { score: Date.now(), value: socketId });
+    await redisClient.pExpire(key, PRESENCE_TTL_MS * 2);
+    return getRoomUserCount(roomId);
+  }
+
+  if (!localRoomUsers.has(roomId)) localRoomUsers.set(roomId, new Set());
+  const users = localRoomUsers.get(roomId);
+  users.add(socketId);
+  return users.size;
+}
+
+async function removeRoomUser(roomId, socketId) {
+  if (redisClient) {
+    const key = getPresenceKey(roomId);
+    await redisClient.zRem(key, socketId);
+    return getRoomUserCount(roomId);
+  }
+
+  const users = localRoomUsers.get(roomId);
+  if (!users) return 0;
+
+  users.delete(socketId);
+  if (users.size === 0) localRoomUsers.delete(roomId);
+  return users.size;
+}
+
+async function refreshRoomUser(roomId, socketId) {
+  if (!redisClient) return;
+
+  const key = getPresenceKey(roomId);
+  await redisClient.zAdd(key, { score: Date.now(), value: socketId });
+  await redisClient.pExpire(key, PRESENCE_TTL_MS * 2);
+}
 
 async function getRoomMessages(roomId, limit = MESSAGE_PAGE_SIZE, cursor = null) {
   const messagesRef = db.collection("rooms").doc(roomId).collection("messages");
@@ -58,32 +117,40 @@ async function getRoomMessages(roomId, limit = MESSAGE_PAGE_SIZE, cursor = null)
 
 io.on("connection", (socket) => {
   console.log("Connected:", socket.id);
+  socket.data.presenceRooms = new Set();
+
+  const presenceHeartbeat = setInterval(() => {
+    Promise.all(
+      [...socket.data.presenceRooms].map((roomId) =>
+        refreshRoomUser(roomId, socket.id)
+      )
+    ).catch((err) => console.error("Presence Heartbeat Error:", err));
+  }, PRESENCE_HEARTBEAT_MS);
 
   socket.on("joinRoom", async ({ roomId, user }) => {
     if (!roomId || !user) return;
-    socket.join(roomId);
-
-    if (!roomUsers[roomId]) roomUsers[roomId] = new Set();
-    roomUsers[roomId].add(socket.id);
-    io.to(roomId).emit("userCountUpdate", roomUsers[roomId].size);
-
-    const batch = db.batch();
-    const roomMemberRef = db.collection("rooms").doc(roomId).collection("members").doc(user.email);
-    batch.set(roomMemberRef, { email: user.email, joinedAt: new Date().toISOString() }, { merge: true });
-
-    const userRoomRef = db.collection("users").doc(user.email).collection("joined_rooms").doc(roomId);
-    batch.set(userRoomRef, { roomId: roomId, lastAccessed: new Date().toISOString() }, { merge: true });
-
-    await batch.commit();
 
     try {
+      await socket.join(roomId);
+      socket.data.presenceRooms.add(roomId);
+      io.to(roomId).emit("userCountUpdate", await addRoomUser(roomId, socket.id));
+
+      const batch = db.batch();
+      const roomMemberRef = db.collection("rooms").doc(roomId).collection("members").doc(user.email);
+      batch.set(roomMemberRef, { email: user.email, joinedAt: new Date().toISOString() }, { merge: true });
+
+      const userRoomRef = db.collection("users").doc(user.email).collection("joined_rooms").doc(roomId);
+      batch.set(userRoomRef, { roomId: roomId, lastAccessed: new Date().toISOString() }, { merge: true });
+
+      await batch.commit();
+
       const page = await getRoomMessages(roomId);
       socket.emit("chatHistory", { roomId, ...page });
     } catch (err) {
-      console.error("History Error:", err);
-      socket.emit("chatHistoryError", {
+      console.error("Join Room Error:", err);
+      socket.emit("roomError", {
         roomId,
-        message: "Unable to load chat history.",
+        message: "Unable to join the room. Please try again.",
       });
     }
   });
@@ -104,13 +171,15 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("leaveRoom", (roomId) => {
+  socket.on("leaveRoom", async (roomId) => {
     if (!roomId || !socket.rooms.has(roomId)) return;
 
-    socket.leave(roomId);
-    if (roomUsers[roomId]) {
-      roomUsers[roomId].delete(socket.id);
-      io.to(roomId).emit("userCountUpdate", roomUsers[roomId].size);
+    try {
+      await socket.leave(roomId);
+      socket.data.presenceRooms.delete(roomId);
+      io.to(roomId).emit("userCountUpdate", await removeRoomUser(roomId, socket.id));
+    } catch (err) {
+      console.error("Leave Room Presence Error:", err);
     }
   });
 
@@ -138,17 +207,46 @@ io.on("connection", (socket) => {
     socket.to(roomId).emit("userTypingUpdate", { email: user.email, isTyping });
   });
 
-  socket.on("disconnecting", () => {
+  socket.on("disconnecting", async () => {
+    clearInterval(presenceHeartbeat);
     socket.rooms.forEach(roomId => {
-      if (roomUsers[roomId]) {
-        roomUsers[roomId].delete(socket.id);
-        io.to(roomId).emit("userCountUpdate", roomUsers[roomId].size);
-      }
+      if (roomId !== socket.id) socket.data.presenceRooms.add(roomId);
     });
+
+    await Promise.all(
+      [...socket.data.presenceRooms].map(async (roomId) => {
+        try {
+          io.to(roomId).emit("userCountUpdate", await removeRoomUser(roomId, socket.id));
+        } catch (err) {
+          console.error("Disconnect Presence Error:", err);
+        }
+      })
+    );
   });
 });
 
-// 3. LISTEN ON 0.0.0.0 FOR RENDER
-httpServer.listen(PORT, '0.0.0.0', () => {
-  console.log(`EchoSystem Server running on port ${PORT}`);
+async function startServer() {
+  if (process.env.REDIS_URL) {
+    const pubClient = createClient({ url: process.env.REDIS_URL });
+    const subClient = pubClient.duplicate();
+
+    pubClient.on("error", (err) => console.error("Redis publisher error:", err));
+    subClient.on("error", (err) => console.error("Redis subscriber error:", err));
+
+    await Promise.all([pubClient.connect(), subClient.connect()]);
+    redisClient = pubClient;
+    io.adapter(createAdapter(pubClient, subClient));
+    console.log("Redis adapter and shared presence enabled.");
+  } else {
+    console.warn("REDIS_URL is unset; running in single-instance mode.");
+  }
+
+  httpServer.listen(PORT, "0.0.0.0", () => {
+    console.log(`EchoSystem Server running on port ${PORT}`);
+  });
+}
+
+startServer().catch((err) => {
+  console.error("Server startup failed:", err);
+  process.exitCode = 1;
 });

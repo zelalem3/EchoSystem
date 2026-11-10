@@ -123,6 +123,18 @@ Set the `FIREBASE_SERVICE_ACCOUNT` environment variable to the service account J
 
 Never commit service account credentials or expose them in frontend code.
 
+#### Configure Redis for multiple backend instances
+
+The backend uses Redis to share Socket.IO broadcasts and room-presence counts across server instances. Configure the same `REDIS_URL` on every instance:
+
+```bash
+REDIS_URL=redis://localhost:6379
+```
+
+In production, use the connection URL supplied by your managed Redis provider and store it as a deployment secret. When `REDIS_URL` is unset, the server runs in single-instance mode with local-only presence. Redis must be reachable before the server starts when the variable is configured.
+
+The frontend currently prefers WebSocket and allows polling as a fallback. If the deployment falls back to HTTP long-polling, configure sticky sessions on the load balancer so all requests for a Socket.IO connection reach the same backend instance.
+
 #### Start the Backend
 
 ```bash

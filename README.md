@@ -79,8 +79,8 @@ Follow these instructions to run EchoSystem locally.
 
 Make sure you have the following installed or configured:
 
-- [Node.js 18+](https://nodejs.org/)
-- npm
+- [Docker Engine and Docker Compose](https://docs.docker.com/compose/install/) to run the containerized stack
+- [Node.js 20.19+](https://nodejs.org/) and npm only if running the frontend or backend directly
 - A [Firebase project](https://console.firebase.google.com/) with Firebase Authentication and Cloud Firestore enabled
 - A Firebase service account key for the backend
 
@@ -90,6 +90,26 @@ Make sure you have the following installed or configured:
 git clone https://github.com/zelalem3/EchoSystem.git
 cd EchoSystem
 ```
+
+### Run the full stack with Docker Compose
+
+Docker Compose starts the React frontend, Socket.IO backend, and Redis:
+
+```bash
+cp .env.example .env
+```
+
+Set `FIREBASE_SERVICE_ACCOUNT` in `.env` to your Firebase Admin service-account JSON as a single-line, single-quoted value. Keep the `.env` file private; it is ignored by Git. Then start the stack:
+
+```bash
+docker compose up --build
+```
+
+Open [http://localhost:8080](http://localhost:8080). The backend is available at `http://localhost:10000`, and its health endpoint is `http://localhost:10000/health`. Redis is available to the backend on the private Compose network and persists its data in a named volume.
+
+Stop the containers with `Ctrl+C`, or run `docker compose down`. To also remove persisted Redis data, run `docker compose down -v`.
+
+The frontend URL and allowed backend origins can be changed through `VITE_SERVER_URL` and `CORS_ALLOWED_ORIGINS` in `.env`. Rebuild after changing `VITE_SERVER_URL`, because Vite embeds it into the static frontend bundle. For production, use a managed Redis instance with authentication/TLS and configure deployment secrets rather than using the local Compose Redis service.
 
 ### 2. Set Up the Backend
 
@@ -148,7 +168,7 @@ The backend uses the port configured through `PORT`, defaulting to `10000` when 
 Open another terminal and navigate to the frontend directory:
 
 ```bash
-cd nexus-chat
+cd frontend
 npm install
 ```
 
@@ -169,13 +189,13 @@ Use the configuration from your Firebase project. Do not put Firebase Admin cred
 
 #### Configure the Socket.IO Connection
 
-Open `src/socket.js` and configure the backend URL:
+Set the backend URL through Vite's `VITE_SERVER_URL` environment variable:
 
-```javascript
-const SERVER_URL = "http://localhost:10000";
+```env
+VITE_SERVER_URL=http://localhost:10000
 ```
 
-For local development, use your local backend URL. For production, configure the deployed backend URL.
+For local development, use your local backend URL. For production, configure the deployed backend URL before building.
 
 #### Start the Frontend
 
@@ -193,7 +213,7 @@ The application will be available at:
 
 ```text
 EchoSystem/
-├── nexus-chat/                 # React + Vite frontend
+├── frontend/                   # React + Vite frontend
 │   ├── src/
 │   │   ├── AuthComponent.jsx
 │   │   ├── ChatEditor.jsx
@@ -202,13 +222,16 @@ EchoSystem/
 │   │   ├── firebase.js
 │   │   ├── socket.js
 │   │   └── ...
+│   ├── Dockerfile
 │   └── package.json
 │
 ├── server/                     # Node.js + Socket.IO backend
 │   ├── server.js               # Server entry point and socket logic
+│   ├── Dockerfile
 │   ├── package.json
 │   └── serviceAccountKey.json  # Local credentials (gitignored)
 │
+├── docker-compose.yml          # Frontend, backend, and Redis services
 └── README.md
 ```
 

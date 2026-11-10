@@ -18,14 +18,31 @@ admin.initializeApp({
 });
 
 const db = admin.firestore();
-const httpServer = createServer();
+const httpServer = createServer((req, res) => {
+  if (req.url !== "/health") {
+    res.writeHead(404);
+    res.end("Not found");
+    return;
+  }
 
-// 2. UPDATED CORS FOR VERCEL
+  const isReady = !process.env.REDIS_URL || redisClient?.isReady;
+  res.writeHead(isReady ? 200 : 503, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({ status: isReady ? "ok" : "unavailable" }));
+});
+
+const allowedOrigins = (
+  process.env.CORS_ALLOWED_ORIGINS ||
+  "http://localhost:5173,http://localhost:8080,https://echo-system-six.vercel.app"
+)
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
 const io = new Server(httpServer, {
-  cors: { 
-    origin: ["http://localhost:5173", "https://echo-system-six.vercel.app"], 
+  cors: {
+    origin: allowedOrigins,
     methods: ["GET", "POST"],
-    credentials: true
+    credentials: true,
   },
 });
 

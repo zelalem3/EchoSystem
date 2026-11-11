@@ -33,6 +33,7 @@ export function ChatEditor({ documentId }) {
   const [historyCursor, setHistoryCursor] = useState(null);
   const [historyError, setHistoryError] = useState("");
   const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState("");
   const [isNearBottom, setIsNearBottom] = useState(true);
   const [hasNewMessages, setHasNewMessages] = useState(false);
 
@@ -50,14 +51,6 @@ export function ChatEditor({ documentId }) {
   useEffect(() => {
     if (!documentId || !auth.currentUser) return;
 
-    setMessages([]);
-    setLoadingHistory(true);
-    setLoadingOlderMessages(false);
-    setHasOlderMessages(false);
-    setHistoryCursor(null);
-    setHistoryError("");
-    setHasNewMessages(false);
-
     const onUserCount = (count) => setActiveUsers(count);
     const onTyping = ({ email, isTyping }) => {
       setTypingUser(isTyping ? email.split("@")[0] : null);
@@ -70,6 +63,7 @@ export function ChatEditor({ documentId }) {
       setHasOlderMessages(Boolean(!Array.isArray(page) && page?.hasMore));
       setLoadingHistory(false);
       setHistoryError("");
+      socket.emit("getUserRooms");
       // Scroll to bottom after history loads
       requestAnimationFrame(() => {
         if (scrollRef.current) {
@@ -121,13 +115,21 @@ export function ChatEditor({ documentId }) {
     socket.on("roomError", onHistoryError);
     socket.on("receiveMessage", onMessage);
 
-    socket.emit("joinRoom", {
-      roomId: documentId,
-      user: { email: auth.currentUser.email },
-    });
+    const joinRoom = () => socket.emit("joinRoom", { roomId: documentId });
+    socket.on("connect", joinRoom);
+    if (socket.connected) joinRoom();
 
     return () => {
-      socket.emit("leaveRoom", documentId);
+      const wasTyping = Boolean(typingTimeoutRef.current);
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = null;
+      if (socket.connected) {
+        if (wasTyping) {
+          socket.emit("typing", { roomId: documentId, isTyping: false });
+        }
+        socket.emit("leaveRoom", documentId);
+      }
+      socket.off("connect", joinRoom);
       socket.off("userCountUpdate", onUserCount);
       socket.off("userTypingUpdate", onTyping);
       socket.off("chatHistory", onHistory);
@@ -152,7 +154,6 @@ export function ChatEditor({ documentId }) {
   useEffect(() => {
     if (isNearBottom && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-      setHasNewMessages(false);
     }
   }, [messages, typingUser, isNearBottom]);
 
@@ -189,19 +190,20 @@ export function ChatEditor({ documentId }) {
     setInput(e.target.value);
     adjustTextareaHeight();
 
-    socket.emit("typing", {
-      roomId: documentId,
-      user: { email: auth.currentUser.email },
-      isTyping: true,
-    });
+    if (!typingTimeoutRef.current) {
+      socket.emit("typing", {
+        roomId: documentId,
+        isTyping: true,
+      });
+    }
 
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     typingTimeoutRef.current = setTimeout(() => {
       socket.emit("typing", {
         roomId: documentId,
-        user: { email: auth.currentUser.email },
         isTyping: false,
       });
+      typingTimeoutRef.current = null;
     }, 2000);
   };
 
@@ -211,17 +213,23 @@ export function ChatEditor({ documentId }) {
     if (!text || sending) return;
 
     setSending(true);
+    setSendError("");
     socket.emit("sendMessage", {
       roomId: documentId,
       message: text,
-      user: { email: auth.currentUser.email },
+    }, (result) => {
+      setSending(false);
+      if (!result?.ok) {
+        setSendError(result?.error || "Unable to send the message. Please try again.");
+        return;
+      }
+
+      setInput("");
+      if (textareaRef.current) {
+        textareaRef.current.style.height = "auto";
+      }
+      setIsNearBottom(true);
     });
-    setInput("");
-    if (textareaRef.current) {
-      textareaRef.current.style.height = "auto";
-    }
-    // Optimistically stay near bottom
-    setIsNearBottom(true);
   };
 
   const handleKeyDown = (e) => {
@@ -431,6 +439,11 @@ export function ChatEditor({ documentId }) {
       )}
 
       {/* Input area */}
+      {sendError && (
+        <p role="alert" className="px-4 pt-2 text-sm text-[var(--color-danger)]">
+          {sendError}
+        </p>
+      )}
       <form
         onSubmit={handleSend}
         className="flex shrink-0 items-end gap-2.5 border-t border-[var(--color-border)] bg-[rgba(255,255,255,0.72)] px-3 py-3 sm:px-4"
@@ -439,7 +452,10 @@ export function ChatEditor({ documentId }) {
           ref={textareaRef}
           rows={1}
           value={input}
-          onChange={handleInputChange}
+          onChange={(event) => {
+            setSendError("");
+            handleInputChange(event);
+          }}
           onKeyDown={handleKeyDown}
           placeholder={`Message #${documentId}`}
           disabled={sending}

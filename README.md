@@ -252,6 +252,8 @@ React components such as `ChatEditor` and `sidebar` should clean up Socket.IO ev
 
 Configure Firestore Security Rules to protect user and room data. The Firebase Admin SDK operates with privileged server-side credentials and bypasses Firestore Security Rules, so backend authorization and validation must be implemented appropriately.
 
+Socket.IO connections must authenticate with a Firebase ID token. The server uses the authenticated account for room membership and message identity; client-supplied identity fields are ignored. A user can create a room by claiming an unused room name, while existing rooms are restricted to their recorded members. Messages are limited to 2,000 characters, with per-connection limits on message, room-join, and typing events.
+
 ### CORS Configuration
 
 The backend must allow requests and Socket.IO connections from the frontend origin.

@@ -1,4 +1,5 @@
 const { MESSAGE_PAGE_SIZE } = require("../services/messageService");
+const { consumeRateLimit, isRoomMember, isValidRoomId } = require("./guards");
 
 const PRESENCE_HEARTBEAT_MS = 20_000;
 
@@ -11,38 +12,60 @@ function registerRoomHandlers(socket, io, { db, messages, presence }) {
     ).catch((err) => console.error("Presence Heartbeat Error:", err));
   }, PRESENCE_HEARTBEAT_MS);
 
-  socket.on("joinRoom", async ({ roomId, user } = {}) => {
-    if (!roomId || !user?.email) return;
+  socket.on("joinRoom", async (payload = {}) => {
+    const { roomId } = payload || {};
+    if (!isValidRoomId(roomId)) {
+      socket.emit("roomError", { roomId, message: "Invalid room name." });
+      return;
+    }
+    if (!consumeRateLimit(socket, "joinRoom", 10, 60_000)) {
+      socket.emit("roomError", {
+        roomId,
+        message: "Too many room requests. Please wait and try again.",
+      });
+      return;
+    }
 
     try {
-      await socket.join(roomId);
-      socket.data.presenceRooms.add(roomId);
-      io.to(roomId).emit("userCountUpdate", await presence.addRoomUser(roomId, socket.id));
-
-      const batch = db.batch();
-      const roomMemberRef = db
-        .collection("rooms")
-        .doc(roomId)
-        .collection("members")
-        .doc(user.email);
-      batch.set(
-        roomMemberRef,
-        { email: user.email, joinedAt: new Date().toISOString() },
-        { merge: true }
-      );
-
+      const user = socket.data.user;
+      const roomRef = db.collection("rooms").doc(roomId);
+      const memberRef = roomRef.collection("members").doc(user.email);
       const userRoomRef = db
         .collection("users")
         .doc(user.email)
         .collection("joined_rooms")
         .doc(roomId);
-      batch.set(
-        userRoomRef,
-        { roomId, lastAccessed: new Date().toISOString() },
-        { merge: true }
-      );
+      const joinedAt = new Date().toISOString();
+      const authorized = await db.runTransaction(async (transaction) => {
+        const memberSnapshot = await transaction.get(memberRef);
+        if (memberSnapshot.exists) {
+          transaction.set(userRoomRef, { roomId, lastAccessed: joinedAt }, { merge: true });
+          return true;
+        }
 
-      await batch.commit();
+        const [roomSnapshot, membersSnapshot] = await Promise.all([
+          transaction.get(roomRef),
+          transaction.get(roomRef.collection("members").limit(1)),
+        ]);
+        if (roomSnapshot.exists || !membersSnapshot.empty) return false;
+
+        transaction.create(roomRef, { createdBy: user.uid, createdAt: joinedAt });
+        transaction.set(memberRef, { email: user.email, joinedAt });
+        transaction.set(userRoomRef, { roomId, lastAccessed: joinedAt });
+        return true;
+      });
+
+      if (!authorized) {
+        socket.emit("roomError", {
+          roomId,
+          message: "You do not have access to this room.",
+        });
+        return;
+      }
+
+      await socket.join(roomId);
+      socket.data.presenceRooms.add(roomId);
+      io.to(roomId).emit("userCountUpdate", await presence.addRoomUser(roomId, socket.id));
 
       const page = await messages.getRoomMessages(roomId);
       socket.emit("chatHistory", { roomId, ...page });
@@ -57,9 +80,29 @@ function registerRoomHandlers(socket, io, { db, messages, presence }) {
 
   socket.on("loadOlderMessages", async (payload = {}) => {
     const { roomId, cursor } = payload || {};
-    if (!roomId || !cursor || !socket.rooms.has(roomId)) return;
+    if (
+      !isValidRoomId(roomId) ||
+      typeof cursor !== "string" ||
+      !cursor ||
+      cursor.includes("/") ||
+      cursor.length > 1500 ||
+      !socket.rooms.has(roomId)
+    ) {
+      socket.emit("chatHistoryError", {
+        roomId,
+        message: "Invalid history request.",
+      });
+      return;
+    }
 
     try {
+      if (!(await isRoomMember(db, roomId, socket.data.user.email))) {
+        socket.emit("chatHistoryError", {
+          roomId,
+          message: "You do not have access to this room.",
+        });
+        return;
+      }
       const page = await messages.getRoomMessages(roomId, MESSAGE_PAGE_SIZE, cursor);
       socket.emit("olderChatHistory", { roomId, ...page });
     } catch (err) {
@@ -72,7 +115,7 @@ function registerRoomHandlers(socket, io, { db, messages, presence }) {
   });
 
   socket.on("leaveRoom", async (roomId) => {
-    if (!roomId || !socket.rooms.has(roomId)) return;
+    if (!isValidRoomId(roomId) || !socket.rooms.has(roomId)) return;
 
     try {
       await socket.leave(roomId);

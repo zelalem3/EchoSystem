@@ -19,17 +19,26 @@ export default function App() {
 
   useEffect(() => {
     if (user) {
-      socket.emit("getUserRooms", user.email);
-      socket.on("userRoomsList", (rooms) => setSavedRooms(rooms));
+      const onRoomsList = (rooms) => setSavedRooms(rooms);
+      socket.on("userRoomsList", onRoomsList);
+      socket.emit("getUserRooms");
+      return () => socket.off("userRoomsList", onRoomsList);
     }
 
-    return () => socket.off("userRoomsList");
+    return undefined;
   }, [user]);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       setLoading(false);
+      if (currentUser) {
+        socket.connect();
+      } else {
+        socket.disconnect();
+        setSavedRooms([]);
+        setCurrentRoomId("");
+      }
     });
 
     return () => unsubscribe();
@@ -125,7 +134,7 @@ export default function App() {
           <main className="flex flex-1 overflow-hidden p-0 md:p-3">
             <div className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-[24px] border border-[var(--color-border)] bg-[rgba(255,255,255,0.72)] shadow-[var(--shadow-md)]">
               {currentRoomId ? (
-                <ChatEditor documentId={currentRoomId} />
+                <ChatEditor key={currentRoomId} documentId={currentRoomId} />
               ) : (
                 <EmptyState
                   icon="💬"

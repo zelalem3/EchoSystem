@@ -1,4 +1,5 @@
 import { io } from "socket.io-client";
+import { auth } from "./firebase";
 
 const SERVER_URL =
   import.meta.env.VITE_SERVER_URL ||
@@ -7,8 +8,24 @@ const SERVER_URL =
     : "https://echosystem-1.onrender.com");
 
 export const socket = io(SERVER_URL, {
-  transports: ["websocket", "polling"], 
-  withCredentials: true
+  autoConnect: false,
+  transports: ["websocket", "polling"],
+  withCredentials: true,
+  auth: (callback) => {
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      callback({});
+      return;
+    }
+
+    currentUser
+      .getIdToken()
+      .then((token) => callback({ token }))
+      .catch((error) => {
+        console.error("Unable to retrieve Firebase ID token:", error);
+        callback({});
+      });
+  },
 });
 
 export const connectSocket = () => {

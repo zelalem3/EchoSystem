@@ -1,6 +1,6 @@
 const { createAdapter } = require("@socket.io/redis-adapter");
 const { createClient } = require("redis");
-const db = require("./config/firebase");
+const { auth, db } = require("./config/firebase");
 const { createApp } = require("./app");
 
 const PORT = process.env.PORT || 10000;
@@ -23,7 +23,7 @@ async function startServer() {
     console.warn("REDIS_URL is unset; running in single-instance mode.");
   }
 
-  const { httpServer, io } = createApp({ db, redisClient });
+  const { httpServer, io } = createApp({ auth, db, redisClient });
   if (redisClient) {
     io.adapter(createAdapter(redisClient, redisSubscriber));
     console.log("Redis adapter and shared presence enabled.");

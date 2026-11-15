@@ -42,7 +42,17 @@ export function ChatEditor({ documentId }) {
   const typingTimeoutRef = useRef(null);
   const isNearBottomRef = useRef(true);
 
-  // Keep ref in sync for use inside socket handlers
+
+  const [roomMeta, setRoomMeta] = useState(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState(null);
+  const [searching, setSearching] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [editText, setEditText] = useState("");
+  const [actionError, setActionError] = useState("");
+
+    // Keep ref in sync for use inside socket handlers
   useEffect(() => {
     isNearBottomRef.current = isNearBottom;
   }, [isNearBottom]);
@@ -51,26 +61,37 @@ export function ChatEditor({ documentId }) {
   useEffect(() => {
     if (!documentId || !auth.currentUser) return;
 
+    setLoadingHistory(true);
+    setHistoryError("");
+    setMessages([]);
+    setRoomMeta(null);
+    setSearchResults(null);
+    setActionError("");
+    setEditingId(null);
+    setEditText("");
+
     const onUserCount = (count) => setActiveUsers(count);
+
     const onTyping = ({ email, isTyping }) => {
       setTypingUser(isTyping ? email.split("@")[0] : null);
     };
+
     const onHistory = (page) => {
       if (!Array.isArray(page) && page?.roomId !== documentId) return;
-      const messages = Array.isArray(page) ? page : page?.messages;
-      setMessages(messages || []);
+      const nextMessages = Array.isArray(page) ? page : page?.messages;
+      setMessages(nextMessages || []);
       setHistoryCursor(Array.isArray(page) ? null : page?.cursor || null);
       setHasOlderMessages(Boolean(!Array.isArray(page) && page?.hasMore));
       setLoadingHistory(false);
       setHistoryError("");
       socket.emit("getUserRooms");
-      // Scroll to bottom after history loads
       requestAnimationFrame(() => {
         if (scrollRef.current) {
           scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
         }
       });
     };
+
     const onOlderHistory = (page) => {
       if (page.roomId !== documentId) return;
 
@@ -91,12 +112,14 @@ export function ChatEditor({ documentId }) {
         }
       });
     };
+
     const onHistoryError = ({ roomId: failedRoomId, message }) => {
       if (failedRoomId !== documentId) return;
       setLoadingHistory(false);
       setLoadingOlderMessages(false);
       setHistoryError(message);
     };
+
     const onMessage = (newMessage) => {
       setMessages((prev) => [...prev, newMessage]);
       setTypingUser(null);
@@ -107,6 +130,30 @@ export function ChatEditor({ documentId }) {
       }
     };
 
+    const onRoomMeta = (meta) => {
+      if (meta?.roomId === documentId) setRoomMeta(meta);
+    };
+
+    const onMessageUpdated = (updated) => {
+      if (!updated?.id) return;
+      setMessages((prev) =>
+        prev.map((m) => (m.id === updated.id ? { ...m, ...updated } : m))
+      );
+      setEditingId((current) => (current === updated.id ? null : current));
+      setEditText((current) => (editingId === updated.id ? "" : current));
+    };
+
+    const onMessageDeleted = ({ id }) => {
+      if (!id) return;
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === id
+            ? { ...m, deleted: true, message: "", edited: false }
+            : m
+        )
+      );
+    };
+
     socket.on("userCountUpdate", onUserCount);
     socket.on("userTypingUpdate", onTyping);
     socket.on("chatHistory", onHistory);
@@ -114,6 +161,9 @@ export function ChatEditor({ documentId }) {
     socket.on("chatHistoryError", onHistoryError);
     socket.on("roomError", onHistoryError);
     socket.on("receiveMessage", onMessage);
+    socket.on("roomMeta", onRoomMeta);
+    socket.on("messageUpdated", onMessageUpdated);
+    socket.on("messageDeleted", onMessageDeleted);
 
     const joinRoom = () => socket.emit("joinRoom", { roomId: documentId });
     socket.on("connect", joinRoom);
@@ -123,12 +173,14 @@ export function ChatEditor({ documentId }) {
       const wasTyping = Boolean(typingTimeoutRef.current);
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
       typingTimeoutRef.current = null;
+
       if (socket.connected) {
         if (wasTyping) {
           socket.emit("typing", { roomId: documentId, isTyping: false });
         }
         socket.emit("leaveRoom", documentId);
       }
+
       socket.off("connect", joinRoom);
       socket.off("userCountUpdate", onUserCount);
       socket.off("userTypingUpdate", onTyping);
@@ -137,6 +189,9 @@ export function ChatEditor({ documentId }) {
       socket.off("chatHistoryError", onHistoryError);
       socket.off("roomError", onHistoryError);
       socket.off("receiveMessage", onMessage);
+      socket.off("roomMeta", onRoomMeta);
+      socket.off("messageUpdated", onMessageUpdated);
+      socket.off("messageDeleted", onMessageDeleted);
     };
   }, [documentId]);
 
@@ -162,7 +217,8 @@ export function ChatEditor({ documentId }) {
     const el = scrollRef.current;
     if (!el) return;
     const threshold = 80;
-    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
+    const nearBottom =
+      el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
     setIsNearBottom(nearBottom);
     if (nearBottom) setHasNewMessages(false);
   }, []);
@@ -214,22 +270,28 @@ export function ChatEditor({ documentId }) {
 
     setSending(true);
     setSendError("");
-    socket.emit("sendMessage", {
-      roomId: documentId,
-      message: text,
-    }, (result) => {
-      setSending(false);
-      if (!result?.ok) {
-        setSendError(result?.error || "Unable to send the message. Please try again.");
-        return;
-      }
+    socket.emit(
+      "sendMessage",
+      {
+        roomId: documentId,
+        message: text,
+      },
+      (result) => {
+        setSending(false);
+        if (!result?.ok) {
+          setSendError(
+            result?.error || "Unable to send the message. Please try again."
+          );
+          return;
+        }
 
-      setInput("");
-      if (textareaRef.current) {
-        textareaRef.current.style.height = "auto";
+        setInput("");
+        if (textareaRef.current) {
+          textareaRef.current.style.height = "auto";
+        }
+        setIsNearBottom(true);
       }
-      setIsNearBottom(true);
-    });
+    );
   };
 
   const handleKeyDown = (e) => {
@@ -239,7 +301,78 @@ export function ChatEditor({ documentId }) {
     }
   };
 
-  // Group helper
+  const handleSearch = (e) => {
+    e?.preventDefault();
+    const q = searchQuery.trim();
+    if (q.length < 2) {
+      setSearchResults(null);
+      return;
+    }
+    setSearching(true);
+    setActionError("");
+    socket.emit("searchMessages", { roomId: documentId, query: q }, (result) => {
+      setSearching(false);
+      if (!result?.ok) {
+        setActionError(result?.error || "Search failed.");
+        setSearchResults([]);
+        return;
+      }
+      setSearchResults(result.messages || []);
+    });
+  };
+
+  const startEdit = (msg) => {
+    if (msg.deleted || msg.email !== auth.currentUser?.email) return;
+    setEditingId(msg.id);
+    setEditText(msg.message || "");
+    setActionError("");
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    setEditText("");
+  };
+
+  const submitEdit = (messageId) => {
+    const text = editText.trim();
+    if (!text) return;
+    setActionError("");
+    socket.emit(
+      "editMessage",
+      { roomId: documentId, messageId, message: text },
+      (result) => {
+        if (!result?.ok) {
+          setActionError(result?.error || "Could not edit message.");
+          return;
+        }
+        setEditingId(null);
+        setEditText("");
+      }
+    );
+  };
+
+  const submitDelete = (messageId) => {
+    if (!window.confirm("Delete this message?")) return;
+    setActionError("");
+    socket.emit("deleteMessage", { roomId: documentId, messageId }, (result) => {
+      if (!result?.ok) {
+        setActionError(result?.error || "Could not delete message.");
+      }
+    });
+  };
+
+  const jumpToMessage = (messageId) => {
+    setSearchOpen(false);
+    setSearchResults(null);
+    const el = document.getElementById(`msg-${messageId}`);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.classList.add("ring-2", "ring-violet-400");
+      setTimeout(() => el.classList.remove("ring-2", "ring-violet-400"), 1500);
+    }
+  };
+
+  // Group helpers
   const isFirstInGroup = (index) => {
     if (index === 0) return true;
     return messages[index].email !== messages[index - 1].email;

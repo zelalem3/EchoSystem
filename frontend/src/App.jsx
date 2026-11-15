@@ -12,11 +12,44 @@ export default function App() {
   const [isConnected, setIsConnected] = useState(socket.connected);
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
-
+  const [isReconnecting, setIsReconnecting] = useState(false);
   const [currentRoomId, setCurrentRoomId] = useState("");
   const [savedRooms, setSavedRooms] = useState([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
+
+  useEffect(() => {
+    const onConnect = () => {
+      setIsConnected(true);
+      setIsReconnecting(false);
+    };
+    const onDisconnect = (reason) => {
+      setIsConnected(false);
+      if (reason !== "io client disconnect") {
+        setIsReconnecting(true);
+      }
+    };
+    const onReconnectAttempt = () => setIsReconnecting(true);
+    const onReconnect = () => {
+      setIsConnected(true);
+      setIsReconnecting(false);
+    };
+    const onReconnectFailed = () => setIsReconnecting(false);
+
+    socket.on("connect", onConnect);
+    socket.on("disconnect", onDisconnect);
+    socket.io.on("reconnect_attempt", onReconnectAttempt);
+    socket.io.on("reconnect", onReconnect);
+    socket.io.on("reconnect_failed", onReconnectFailed);
+
+    return () => {
+      socket.off("connect", onConnect);
+      socket.off("disconnect", onDisconnect);
+      socket.io.off("reconnect_attempt", onReconnectAttempt);
+      socket.io.off("reconnect", onReconnect);
+      socket.io.off("reconnect_failed", onReconnectFailed);
+    };
+  }, []);
   useEffect(() => {
     if (user) {
       const onRoomsList = (rooms) => setSavedRooms(rooms);
@@ -118,7 +151,7 @@ export default function App() {
                   </h1>
                 </div>
               </div>
-              <ConnectionState isConnected={isConnected} />
+              <ConnectionState isConnected={isConnected} isReconnecting={isReconnecting} />
             </div>
 
             <div className="flex items-center gap-3">

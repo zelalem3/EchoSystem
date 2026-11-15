@@ -7,18 +7,24 @@ export function Sidebar({
   setCurrentRoomId,
   isOpen,
   onClose,
+  onCreateRoom,
 }) {
   const [roomInput, setRoomInput] = useState("");
   const [showForm, setShowForm] = useState(false);
+  const [description, setDescription] = useState("");
 
   const handleJoin = (e) => {
     e.preventDefault();
     const cleanId = roomInput.trim().toLowerCase().replace(/\s+/g, "-");
     if (!cleanId) return;
+
+    const safeDescription = description.trim().slice(0, 280);
+    onCreateRoom?.(cleanId, safeDescription);
     setCurrentRoomId(cleanId);
     setRoomInput("");
+    setDescription("");
     setShowForm(false);
-    onClose?.(); // close mobile drawer after joining
+    onClose?.();
   };
 
   const handleSelectRoom = (id) => {
@@ -98,6 +104,14 @@ export function Sidebar({
               autoFocus
               className="text-sm"
             />
+            <Input
+              placeholder="Short description (optional)"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              autoComplete="off"
+              className="text-sm"
+              maxLength={280}
+            />
             <Button
               type="submit"
               size="sm"
@@ -108,6 +122,9 @@ export function Sidebar({
             </Button>
           </form>
         )}
+
+  
+
 
         <div className="flex-1 overflow-y-auto px-2 pb-4 pt-1">
           {savedRooms.length === 0 && !showForm ? (

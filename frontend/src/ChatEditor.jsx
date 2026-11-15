@@ -22,7 +22,7 @@ function MessageSkeleton() {
   );
 }
 
-export function ChatEditor({ documentId }) {
+export function ChatEditor({ documentId, pendingDescription = "", onJoined }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [activeUsers, setActiveUsers] = useState(0);
@@ -165,7 +165,15 @@ export function ChatEditor({ documentId }) {
     socket.on("messageUpdated", onMessageUpdated);
     socket.on("messageDeleted", onMessageDeleted);
 
-    const joinRoom = () => socket.emit("joinRoom", { roomId: documentId });
+    const joinRoom = () => {
+      socket.emit("joinRoom", {
+        roomId: documentId,
+        ...(pendingDescription
+          ? { description: pendingDescription }
+          : {}),
+      });
+      onJoined?.();
+    };
     socket.on("connect", joinRoom);
     if (socket.connected) joinRoom();
 

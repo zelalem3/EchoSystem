@@ -23,6 +23,11 @@ Users can create or join rooms, see who is online, watch typing indicators in re
 - 📜 **Chat history** — Loads previous messages when users join a room.
 - 🎨 **Modern chat UI** — Sender and receiver message bubbles with automatic scrolling.
 - 🔄 **Event-driven architecture** — Keeps client and server state synchronized through real-time events.
+- 🛡️ **Authenticated sockets** — Firebase ID tokens verified on every connection.
+- ✏️ **Edit & soft-delete** — Authors can edit or soft-delete their own messages.
+- 🔍 **In-room search** — Search recent messages inside a room.
+- 📋 **Room metadata** — Description, creator, and last activity.
+- 🔁 **Reconnect UX** — Connection badge shows Connected / Reconnecting / Disconnected.
 
 ---
 
@@ -274,6 +279,14 @@ The backend uses `process.env.PORT` when available and defaults to port `10000`.
 - Never commit `.env` files or service account JSON files containing secrets.
 - Configure production environment variables through your hosting provider.
 - Use `.gitignore` to exclude sensitive files.
+
+### Security notes
+
+- All Firestore **writes** go through the Node Admin SDK. Deploy `firestore.rules` from the repo root in the Firebase Console so clients cannot write directly.
+- Socket actions are rate-limited and membership-checked on the server.
+- Messages support audit fields: `deleted`, `deletedAt`, `deletedBy`, `edited`, `editedAt`.
+
+
 
 ---
 

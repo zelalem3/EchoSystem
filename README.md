@@ -256,21 +256,13 @@ Socket.IO connections must authenticate with a Firebase ID token. The server use
 
 ### CORS Configuration
 
-The backend must allow requests and Socket.IO connections from the frontend origin.
+The backend uses `CORS_ALLOWED_ORIGINS` for both HTTP requests and Socket.IO connections. Set it to a comma-separated list of exact frontend origins (no trailing slash):
 
-For local development, configure:
-
-```text
-http://localhost:5173
+```env
+CORS_ALLOWED_ORIGINS=http://localhost:5173,https://echo-system-six.vercel.app
 ```
 
-For production, configure your deployed Vercel frontend origin:
-
-```text
-https://echo-system-six.vercel.app
-```
-
-Allow only the origins required by your deployment.
+The default list includes the local Vite and Docker frontend origins plus the deployed Vercel origin. Allow only the origins required by your deployment.
 
 ### Backend Port
 

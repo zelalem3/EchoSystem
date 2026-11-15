@@ -14,7 +14,7 @@ function registerSocketHandlers(io, dependencies) {
       messages,
       presence,
     });
-    registerChatHandlers(socket, io, db);
+    registerChatHandlers(socket, io, { db, messages });
     registerUserHandlers(socket, db);
 
     socket.on("disconnecting", async () => {

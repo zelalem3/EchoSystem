@@ -43,7 +43,12 @@ function createSocket({
   return { broadcasts, db, handlers, socket };
 }
 
-function createRoomHarness({ memberExists = false, roomExists = false, hasMembers = false } = {}) {
+function createRoomHarness({
+  memberExists = false,
+  roomExists = false,
+  hasMembers = false,
+  roomMeta = {},
+} = {}) {
   const handlers = new Map();
   const writes = [];
   const roomRef = {
@@ -67,8 +72,13 @@ function createRoomHarness({ memberExists = false, roomExists = false, hasMember
     runTransaction: (callback) =>
       callback({
         get: async (ref) => {
+          if (writes.length) {
+            throw new Error("Transaction reads must precede writes.");
+          }
           if (ref.type === "member") return { exists: memberExists };
-          if (ref.type === "room") return { exists: roomExists };
+          if (ref.type === "room") {
+            return { exists: roomExists, data: () => roomMeta };
+          }
           return { empty: !hasMembers };
         },
         create: (ref, value) => writes.push({ operation: "create", ref, value }),
@@ -198,6 +208,37 @@ test("allows a user to claim an unused room and adds them as a member", async ()
   assert.equal(writes.some((write) => write.operation === "create"), true);
   assert.equal(writes.some((write) => write.ref.type === "member"), true);
   assert.ok(emitted.some((event) => event.event === "chatHistory"));
+});
+
+test("allows an existing member to rejoin and load room metadata", async () => {
+  const roomMeta = {
+    createdBy: "user-1",
+    createdByEmail: "user@example.com",
+    description: "Existing room",
+  };
+  const { clearHeartbeat, emitted, handlers, socket, writes } =
+    createRoomHarness({ memberExists: true, roomExists: true, roomMeta });
+
+  try {
+    await handlers.get("joinRoom")({ roomId: "existing-room" });
+  } finally {
+    clearHeartbeat();
+  }
+
+  assert.equal(socket.rooms.has("existing-room"), true);
+  assert.ok(writes.some((write) => write.ref.type === "userRoom"));
+  assert.ok(emitted.some((event) => event.event === "chatHistory"));
+  assert.deepEqual(
+    emitted.find((event) => event.event === "roomMeta")?.payload,
+    {
+      roomId: "existing-room",
+      createdBy: "user-1",
+      createdByEmail: "user@example.com",
+      createdAt: null,
+      lastActivity: null,
+      description: "Existing room",
+    }
+  );
 });
 
 test("denies joining an existing room without membership", async () => {

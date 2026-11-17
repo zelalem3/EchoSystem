@@ -8,15 +8,50 @@ import { Sidebar } from "./sidebar";
 import { auth } from "./firebase";
 import { Button, Spinner, EmptyState } from "./components/ui";
 
+
 export default function App() {
   const [isConnected, setIsConnected] = useState(socket.connected);
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
-
+  const [isReconnecting, setIsReconnecting] = useState(false);
   const [currentRoomId, setCurrentRoomId] = useState("");
   const [savedRooms, setSavedRooms] = useState([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [pendingRoomDescription, setPendingRoomDescription] = useState("");
 
+
+  useEffect(() => {
+    const onConnect = () => {
+      setIsConnected(true);
+      setIsReconnecting(false);
+    };
+    const onDisconnect = (reason) => {
+      setIsConnected(false);
+      if (reason !== "io client disconnect") {
+        setIsReconnecting(true);
+      }
+    };
+    const onReconnectAttempt = () => setIsReconnecting(true);
+    const onReconnect = () => {
+      setIsConnected(true);
+      setIsReconnecting(false);
+    };
+    const onReconnectFailed = () => setIsReconnecting(false);
+
+    socket.on("connect", onConnect);
+    socket.on("disconnect", onDisconnect);
+    socket.io.on("reconnect_attempt", onReconnectAttempt);
+    socket.io.on("reconnect", onReconnect);
+    socket.io.on("reconnect_failed", onReconnectFailed);
+
+    return () => {
+      socket.off("connect", onConnect);
+      socket.off("disconnect", onDisconnect);
+      socket.io.off("reconnect_attempt", onReconnectAttempt);
+      socket.io.off("reconnect", onReconnect);
+      socket.io.off("reconnect_failed", onReconnectFailed);
+    };
+  }, []);
   useEffect(() => {
     if (user) {
       const onRoomsList = (rooms) => setSavedRooms(rooms);
@@ -57,6 +92,10 @@ export default function App() {
     };
   }, []);
 
+
+  const handleSetCurrentRoomId = (id) => {
+    setCurrentRoomId(id);
+  };
   // Close mobile sidebar on resize to desktop
   useEffect(() => {
     const handleResize = () => {
@@ -89,9 +128,13 @@ export default function App() {
         <Sidebar
           savedRooms={savedRooms}
           currentRoomId={currentRoomId}
-          setCurrentRoomId={setCurrentRoomId}
+          setCurrentRoomId={handleSetCurrentRoomId}
           isOpen={sidebarOpen}
           onClose={() => setSidebarOpen(false)}
+          onCreateRoom={(roomId, description) => {
+            setPendingRoomDescription(description || "");
+            setCurrentRoomId(roomId);
+          }}
         />
 
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
@@ -118,7 +161,7 @@ export default function App() {
                   </h1>
                 </div>
               </div>
-              <ConnectionState isConnected={isConnected} />
+              <ConnectionState isConnected={isConnected} isReconnecting={isReconnecting} />
             </div>
 
             <div className="flex items-center gap-3">
@@ -134,7 +177,12 @@ export default function App() {
           <main className="flex flex-1 overflow-hidden p-0 md:p-3">
             <div className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-[24px] border border-[var(--color-border)] bg-[rgba(255,255,255,0.72)] shadow-[var(--shadow-md)]">
               {currentRoomId ? (
-                <ChatEditor key={currentRoomId} documentId={currentRoomId} />
+                <ChatEditor
+                  key={currentRoomId}
+                  documentId={currentRoomId}
+                  pendingDescription={pendingRoomDescription}
+                  onJoined={() => setPendingRoomDescription("")}
+                />
               ) : (
                 <EmptyState
                   icon="💬"

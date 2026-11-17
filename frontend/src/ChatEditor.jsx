@@ -57,10 +57,17 @@ export function ChatEditor({
   const textareaRef = useRef(null);
   const typingTimeoutRef = useRef(null);
   const isNearBottomRef = useRef(true);
+  const pendingDescriptionRef = useRef(pendingDescription);
+  const onJoinedRef = useRef(onJoined);
 
   useEffect(() => {
     isNearBottomRef.current = isNearBottom;
   }, [isNearBottom]);
+
+  useEffect(() => {
+    pendingDescriptionRef.current = pendingDescription;
+    onJoinedRef.current = onJoined;
+  }, [pendingDescription, onJoined]);
 
   useEffect(() => {
     if (!documentId || !auth.currentUser) return;
@@ -92,7 +99,7 @@ export function ChatEditor({
       setLoadingHistory(false);
       setHistoryError("");
       socket.emit("getUserRooms");
-      onJoined?.();
+      onJoinedRef.current?.();
       requestAnimationFrame(() => {
         if (scrollRef.current) {
           scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -176,7 +183,9 @@ export function ChatEditor({
     const joinRoom = () => {
       socket.emit("joinRoom", {
         roomId: documentId,
-        ...(pendingDescription ? { description: pendingDescription } : {}),
+        ...(pendingDescriptionRef.current
+          ? { description: pendingDescriptionRef.current }
+          : {}),
       });
     };
 
@@ -207,7 +216,7 @@ export function ChatEditor({
       socket.off("messageUpdated", onMessageUpdated);
       socket.off("messageDeleted", onMessageDeleted);
     };
-  }, [documentId, pendingDescription, onJoined]);
+  }, [documentId]);
 
   const loadOlderMessages = () => {
     if (!historyCursor || loadingOlderMessages) return;

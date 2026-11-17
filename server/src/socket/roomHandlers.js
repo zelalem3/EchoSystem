@@ -42,13 +42,13 @@ function registerRoomHandlers(socket, io, { db, messages, presence }) {
       const authorized = await db.runTransaction(async (transaction) => {
         const memberSnapshot = await transaction.get(memberRef);
         if (memberSnapshot.exists) {
+          const roomSnap = await transaction.get(roomRef);
+          roomMeta = roomSnap.exists ? roomSnap.data() : null;
           transaction.set(
             userRoomRef,
             { roomId, lastAccessed: joinedAt },
             { merge: true }
           );
-          const roomSnap = await transaction.get(roomRef);
-          roomMeta = roomSnap.exists ? roomSnap.data() : null;
           return true;
         }
 

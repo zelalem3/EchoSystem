@@ -356,6 +356,15 @@ export function ChatEditor({
           setActionError(result?.error || "Could not edit message.");
           return;
         }
+        if (result.message) {
+          setMessages((previous) =>
+            previous.map((message) =>
+              message.id === result.message.id
+                ? { ...message, ...result.message }
+                : message
+            )
+          );
+        }
         setEditingId(null);
         setEditText("");
       }
@@ -372,7 +381,16 @@ export function ChatEditor({
       (result) => {
         if (!result?.ok) {
           setActionError(result?.error || "Could not delete message.");
+          return;
         }
+        const deletedId = result?.messageId || messageId;
+        setMessages((previous) =>
+          previous.map((message) =>
+            message.id === deletedId
+              ? { ...message, deleted: true, message: "", edited: false }
+              : message
+          )
+        );
       }
     );
   };
@@ -567,7 +585,14 @@ export function ChatEditor({
             )}
 
             {messages.map((msg, i) => {
-              const isMe = msg.email === auth.currentUser?.email;
+              const currentUser = auth.currentUser;
+              const isMe =
+                Boolean(currentUser) &&
+                (msg.uid === currentUser.uid ||
+                  (typeof msg.email === "string" &&
+                    typeof currentUser.email === "string" &&
+                    msg.email.trim().toLowerCase() ===
+                      currentUser.email.trim().toLowerCase()));
               const first = isFirstInGroup(i);
               const last = isLastInGroup(i);
               const showHeader = !isMe && first;
@@ -681,14 +706,14 @@ export function ChatEditor({
                           <button
                             type="button"
                             onClick={() => startEdit(msg)}
-                            className="text-[11px] font-medium text-[var(--color-text-muted)] hover:text-violet-600"
+                            className="rounded-md border border-[var(--color-border)] bg-white/80 px-2.5 py-1 text-xs font-semibold text-[var(--color-text-secondary)] shadow-sm transition hover:border-violet-300 hover:bg-violet-50 hover:text-violet-700"
                           >
                             Edit
                           </button>
                           <button
                             type="button"
                             onClick={() => submitDelete(msg.id)}
-                            className="text-[11px] font-medium text-[var(--color-text-muted)] hover:text-red-600"
+                            className="rounded-md border border-[var(--color-border)] bg-white/80 px-2.5 py-1 text-xs font-semibold text-[var(--color-text-secondary)] shadow-sm transition hover:border-red-300 hover:bg-red-50 hover:text-red-700"
                           >
                             Delete
                           </button>

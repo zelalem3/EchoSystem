@@ -12,6 +12,8 @@ export function Sidebar({
   const [roomInput, setRoomInput] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [description, setDescription] = useState("");
+  const [visibility, setVisibility] = useState("public");
+  const [inviteCode, setInviteCode] = useState("");
 
   const handleJoin = (e) => {
     e.preventDefault();
@@ -19,10 +21,16 @@ export function Sidebar({
     if (!cleanId) return;
 
     const safeDescription = description.trim().slice(0, 280);
-    onCreateRoom?.(cleanId, safeDescription);
+    onCreateRoom?.({
+      roomId: cleanId,
+      description: safeDescription,
+      visibility,
+      inviteCode: inviteCode.trim(),
+    });
     setCurrentRoomId(cleanId);
     setRoomInput("");
     setDescription("");
+    setInviteCode("");
     setShowForm(false);
     onClose?.();
   };
@@ -112,13 +120,33 @@ export function Sidebar({
               className="text-sm"
               maxLength={280}
             />
+            <label className="block text-xs font-semibold text-[var(--color-text-secondary)]">
+              Room access
+              <select
+                value={visibility}
+                onChange={(e) => setVisibility(e.target.value)}
+                className="mt-1.5 w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)]"
+              >
+                <option value="public">Public - anyone with the room name</option>
+                <option value="private">Private - invite code required</option>
+              </select>
+            </label>
+            {visibility === "private" && (
+              <Input
+                placeholder="Invite code (leave blank to create)"
+                value={inviteCode}
+                onChange={(e) => setInviteCode(e.target.value)}
+                autoComplete="off"
+                className="text-sm"
+              />
+            )}
             <Button
               type="submit"
               size="sm"
               className="w-full"
               disabled={!roomInput.trim()}
             >
-              Join / Create
+              Join or create room
             </Button>
           </form>
         )}
@@ -171,7 +199,7 @@ export function Sidebar({
 
         <div className="border-t border-[var(--color-border)] bg-[rgba(255,255,255,0.22)] px-4 py-3">
           <p className="text-xs text-[var(--color-text-muted)]">
-            Rooms are created on first join
+            Public rooms can be joined by name. Private rooms require an invite code.
           </p>
         </div>
       </aside>

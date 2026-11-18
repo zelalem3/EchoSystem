@@ -7,6 +7,7 @@ import { onAuthStateChanged, signOut } from "firebase/auth";
 import { Sidebar } from "./sidebar";
 import { auth } from "./firebase";
 import { Button, Spinner, EmptyState } from "./components/ui";
+import { ProfilePage } from "./ProfilePage";
 
 
 export default function App() {
@@ -18,6 +19,9 @@ export default function App() {
   const [savedRooms, setSavedRooms] = useState([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [pendingRoomDescription, setPendingRoomDescription] = useState("");
+  const [pendingRoomVisibility, setPendingRoomVisibility] = useState("public");
+  const [pendingInviteCode, setPendingInviteCode] = useState("");
+  const [showProfile, setShowProfile] = useState(false);
 
 
   useEffect(() => {
@@ -68,6 +72,12 @@ export default function App() {
       setUser(currentUser);
       setLoading(false);
       if (currentUser) {
+        const params = new URLSearchParams(window.location.search);
+        const inviteRoomId = params.get("room");
+        if (inviteRoomId) {
+          setCurrentRoomId(inviteRoomId);
+          setPendingInviteCode(params.get("invite") || "");
+        }
         socket.connect();
       } else {
         socket.disconnect();
@@ -95,6 +105,7 @@ export default function App() {
 
   const handleSetCurrentRoomId = (id) => {
     setCurrentRoomId(id);
+    setShowProfile(false);
   };
   // Close mobile sidebar on resize to desktop
   useEffect(() => {
@@ -131,9 +142,12 @@ export default function App() {
           setCurrentRoomId={handleSetCurrentRoomId}
           isOpen={sidebarOpen}
           onClose={() => setSidebarOpen(false)}
-          onCreateRoom={(roomId, description) => {
+          onCreateRoom={({ roomId, description, visibility, inviteCode }) => {
             setPendingRoomDescription(description || "");
+            setPendingRoomVisibility(visibility || "public");
+            setPendingInviteCode(inviteCode || "");
             setCurrentRoomId(roomId);
+            setShowProfile(false);
           }}
         />
 
@@ -166,8 +180,15 @@ export default function App() {
 
             <div className="flex items-center gap-3">
               <span className="hidden max-w-[180px] truncate text-sm text-[var(--color-text-secondary)] sm:inline">
-                {user.email}
+                {user.displayName || user.email}
               </span>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setShowProfile(true)}
+              >
+                Profile
+              </Button>
               <Button variant="secondary" size="sm" onClick={() => signOut(auth)}>
                 Logout
               </Button>
@@ -176,12 +197,31 @@ export default function App() {
 
           <main className="flex flex-1 overflow-hidden p-0 md:p-3">
             <div className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-[24px] border border-[var(--color-border)] bg-[rgba(255,255,255,0.72)] shadow-[var(--shadow-md)]">
-              {currentRoomId ? (
+              {showProfile ? (
+                <ProfilePage
+                  user={user}
+                  onBack={() => setShowProfile(false)}
+                />
+              ) : currentRoomId ? (
                 <ChatEditor
                   key={currentRoomId}
                   documentId={currentRoomId}
                   pendingDescription={pendingRoomDescription}
-                  onJoined={() => setPendingRoomDescription("")}
+                  pendingVisibility={pendingRoomVisibility}
+                  pendingInviteCode={pendingInviteCode}
+                  onJoined={() => {
+                    setPendingRoomDescription("");
+                    setPendingInviteCode("");
+                    window.history.replaceState(
+                      null,
+                      "",
+                      `${window.location.pathname}${window.location.hash}`
+                    );
+                  }}
+                  onKicked={() => {
+                    setCurrentRoomId("");
+                    socket.emit("getUserRooms");
+                  }}
                 />
               ) : (
                 <EmptyState

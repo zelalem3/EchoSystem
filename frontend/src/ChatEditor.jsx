@@ -28,7 +28,10 @@ function MessageSkeleton() {
 export function ChatEditor({
   documentId,
   pendingDescription = "",
+  pendingVisibility = "public",
+  pendingInviteCode = "",
   onJoined,
+  onKicked,
 }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
@@ -52,6 +55,9 @@ export function ChatEditor({
   const [editingId, setEditingId] = useState(null);
   const [editText, setEditText] = useState("");
   const [actionError, setActionError] = useState("");
+  const [roomMembers, setRoomMembers] = useState([]);
+  const [membersOpen, setMembersOpen] = useState(false);
+  const [inviteCopied, setInviteCopied] = useState(false);
 
   const scrollRef = useRef(null);
   const textareaRef = useRef(null);
@@ -59,6 +65,9 @@ export function ChatEditor({
   const isNearBottomRef = useRef(true);
   const pendingDescriptionRef = useRef(pendingDescription);
   const onJoinedRef = useRef(onJoined);
+  const onKickedRef = useRef(onKicked);
+  const pendingVisibilityRef = useRef(pendingVisibility);
+  const pendingInviteCodeRef = useRef(pendingInviteCode);
 
   useEffect(() => {
     isNearBottomRef.current = isNearBottom;
@@ -67,22 +76,13 @@ export function ChatEditor({
   useEffect(() => {
     pendingDescriptionRef.current = pendingDescription;
     onJoinedRef.current = onJoined;
-  }, [pendingDescription, onJoined]);
+    onKickedRef.current = onKicked;
+    pendingVisibilityRef.current = pendingVisibility;
+    pendingInviteCodeRef.current = pendingInviteCode;
+  }, [pendingDescription, pendingVisibility, pendingInviteCode, onJoined, onKicked]);
 
   useEffect(() => {
     if (!documentId || !auth.currentUser) return;
-
-    setLoadingHistory(true);
-    setHistoryError("");
-    setMessages([]);
-    setRoomMeta(null);
-    setSearchResults(null);
-    setActionError("");
-    setEditingId(null);
-    setEditText("");
-    setActiveUsers(0);
-    setTypingUser(null);
-    setHasNewMessages(false);
 
     const onUserCount = (count) => setActiveUsers(count);
 
@@ -98,6 +98,13 @@ export function ChatEditor({
       setHasOlderMessages(Boolean(!Array.isArray(page) && page?.hasMore));
       setLoadingHistory(false);
       setHistoryError("");
+      const messageIds = (nextMessages || [])
+        .filter((message) => message.id && message.email !== auth.currentUser?.email)
+        .map((message) => message.id);
+      if (messageIds.length) {
+        socket.emit("markMessagesDelivered", { roomId: documentId, messageIds });
+        socket.emit("markMessagesRead", { roomId: documentId, messageIds });
+      }
       socket.emit("getUserRooms");
       onJoinedRef.current?.();
       requestAnimationFrame(() => {
@@ -115,6 +122,13 @@ export function ChatEditor({
       const previousTop = element?.scrollTop ?? 0;
 
       setMessages((previous) => [...(page.messages || []), ...previous]);
+      const messageIds = (page.messages || [])
+        .filter((message) => message.id && message.email !== auth.currentUser?.email)
+        .map((message) => message.id);
+      if (messageIds.length) {
+        socket.emit("markMessagesDelivered", { roomId: documentId, messageIds });
+        socket.emit("markMessagesRead", { roomId: documentId, messageIds });
+      }
       setHistoryCursor(page.cursor || null);
       setHasOlderMessages(Boolean(page.hasMore));
       setLoadingOlderMessages(false);
@@ -137,6 +151,11 @@ export function ChatEditor({
 
     const onMessage = (newMessage) => {
       setMessages((prev) => [...prev, newMessage]);
+      if (newMessage?.id && newMessage.email !== auth.currentUser?.email) {
+        const messageIds = [newMessage.id];
+        socket.emit("markMessagesDelivered", { roomId: documentId, messageIds });
+        socket.emit("markMessagesRead", { roomId: documentId, messageIds });
+      }
       setTypingUser(null);
       setSending(false);
 
@@ -146,7 +165,42 @@ export function ChatEditor({
     };
 
     const onRoomMeta = (meta) => {
-      if (meta?.roomId === documentId) setRoomMeta(meta);
+      if (meta?.roomId === documentId) {
+        setRoomMeta((previous) => ({
+          ...previous,
+          ...meta,
+          role: meta.role || previous?.role,
+        }));
+      }
+    };
+
+    const onRoomMembers = (members) => {
+      const currentMembers = members || [];
+      setRoomMembers(currentMembers);
+      const currentUserMember = currentMembers.find(
+        (member) => member.email === auth.currentUser?.email
+      );
+      if (currentUserMember) {
+        setRoomMeta((previous) => ({
+          ...previous,
+          role: currentUserMember.role || "member",
+        }));
+      }
+    };
+
+    const onMessageStatus = (receipt) => {
+      if (!receipt?.id) return;
+      setMessages((previous) =>
+        previous.map((message) =>
+          message.id === receipt.id ? { ...message, ...receipt } : message
+        )
+      );
+    };
+
+    const onRoomKicked = ({ roomId } = {}) => {
+      if (roomId !== documentId) return;
+      setActionError("You were removed from this room by a moderator.");
+      onKickedRef.current?.();
     };
 
     const onMessageUpdated = (updated) => {
@@ -177,6 +231,9 @@ export function ChatEditor({
     socket.on("roomError", onHistoryError);
     socket.on("receiveMessage", onMessage);
     socket.on("roomMeta", onRoomMeta);
+    socket.on("roomMembersUpdate", onRoomMembers);
+    socket.on("messageStatusUpdate", onMessageStatus);
+    socket.on("roomKicked", onRoomKicked);
     socket.on("messageUpdated", onMessageUpdated);
     socket.on("messageDeleted", onMessageDeleted);
 
@@ -186,6 +243,8 @@ export function ChatEditor({
         ...(pendingDescriptionRef.current
           ? { description: pendingDescriptionRef.current }
           : {}),
+        visibility: pendingVisibilityRef.current,
+        inviteCode: pendingInviteCodeRef.current,
       });
     };
 
@@ -213,6 +272,9 @@ export function ChatEditor({
       socket.off("roomError", onHistoryError);
       socket.off("receiveMessage", onMessage);
       socket.off("roomMeta", onRoomMeta);
+      socket.off("roomMembersUpdate", onRoomMembers);
+      socket.off("messageStatusUpdate", onMessageStatus);
+      socket.off("roomKicked", onRoomKicked);
       socket.off("messageUpdated", onMessageUpdated);
       socket.off("messageDeleted", onMessageDeleted);
     };
@@ -404,6 +466,33 @@ export function ChatEditor({
     );
   };
 
+  const copyInviteLink = async () => {
+    if (!roomMeta?.inviteCode) return;
+    try {
+      const inviteUrl = new URL(window.location.href);
+      inviteUrl.searchParams.set("room", documentId);
+      inviteUrl.searchParams.set("invite", roomMeta.inviteCode);
+      await navigator.clipboard.writeText(inviteUrl.toString());
+      setInviteCopied(true);
+      setTimeout(() => setInviteCopied(false), 2000);
+    } catch {
+      setActionError("Could not copy the invite link. Check browser clipboard permissions.");
+    }
+  };
+
+  const manageMember = (email, action) => {
+    setActionError("");
+    socket.emit(
+      "manageRoomMember",
+      { roomId: documentId, email, action },
+      (result) => {
+        if (!result?.ok) {
+          setActionError(result?.error || "Could not update room membership.");
+        }
+      }
+    );
+  };
+
   const jumpToMessage = (messageId) => {
     setSearchOpen(false);
     setSearchResults(null);
@@ -432,7 +521,7 @@ export function ChatEditor({
         <div className="min-w-0 flex-1">
           <div className="mb-1 inline-flex items-center gap-2 rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-violet-700">
             <span className="h-1.5 w-1.5 rounded-full bg-violet-500" />
-            Room
+            {roomMeta?.visibility === "private" ? "Private room" : "Public room"}
           </div>
           <h3 className="truncate text-base font-semibold text-[var(--color-text)]">
             <span className="mr-1 text-[var(--color-text-muted)]">#</span>
@@ -459,33 +548,128 @@ export function ChatEditor({
                 · created by {roomMeta.createdByEmail.split("@")[0]}
               </span>
             ) : null}
+            {roomMeta?.role && (
+              <span className="text-[11px] font-semibold capitalize text-[var(--color-primary)]">
+                · {roomMeta.role}
+              </span>
+            )}
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={() => {
-            setSearchOpen((v) => !v);
-            setSearchResults(null);
-            setActionError("");
-          }}
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[var(--color-border)] bg-white/80 text-[var(--color-text-secondary)] shadow-sm transition hover:bg-[var(--color-surface-secondary)]"
-          aria-label="Search in room"
-          title="Search in room"
-        >
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
+        <div className="flex shrink-0 items-center gap-1.5">
+          {roomMeta?.visibility === "private" && roomMeta?.inviteCode && (
+            <button
+              type="button"
+              onClick={copyInviteLink}
+              className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-2 text-xs font-semibold text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-secondary)]"
+            >
+              {inviteCopied ? "Copied" : "Invite"}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setMembersOpen((open) => !open)}
+            className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-2 text-xs font-semibold text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-secondary)]"
+            aria-expanded={membersOpen}
           >
-            <circle cx="11" cy="11" r="7" />
-            <path d="M20 20l-3-3" />
-          </svg>
-        </button>
+            Members ({roomMembers.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setSearchOpen((v) => !v);
+              setSearchResults(null);
+              setActionError("");
+            }}
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-secondary)] shadow-sm transition hover:bg-[var(--color-surface-secondary)]"
+            aria-label="Search in room"
+            title="Search in room"
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
+              <circle cx="11" cy="11" r="7" />
+              <path d="M20 20l-3-3" />
+            </svg>
+          </button>
+        </div>
       </div>
+
+      {membersOpen && (
+        <div className="max-h-[38vh] shrink-0 overflow-y-auto border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3">
+          <ul className="space-y-2">
+            {roomMembers.map((member) => {
+              const isMe = member.email === auth.currentUser?.email;
+              const isOwner = member.role === "owner";
+              const isAdmin = roomMeta?.role === "owner" || roomMeta?.role === "admin";
+              const canModerate =
+                isAdmin &&
+                !isMe &&
+                !isOwner &&
+                (roomMeta?.role === "owner" || member.role !== "admin");
+              const isMuted = Boolean(member.mutedUntil);
+
+              return (
+                <li
+                  key={member.email}
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--color-border)] px-3 py-2"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-[var(--color-text)]">
+                      {member.displayName || member.email}
+                      {isMe ? " (you)" : ""}
+                    </p>
+                    <p className="text-xs capitalize text-[var(--color-text-muted)]">
+                      {member.role || "member"}{isMuted ? " · muted" : ""}
+                    </p>
+                  </div>
+                  {canModerate && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {roomMeta?.role === "owner" && member.role !== "admin" && (
+                        <button
+                          type="button"
+                          onClick={() => manageMember(member.email, "promote")}
+                          className="rounded-lg border border-[var(--color-border)] px-2 py-1 text-[11px] font-semibold text-[var(--color-primary)]"
+                        >
+                          Make admin
+                        </button>
+                      )}
+                      {roomMeta?.role === "owner" && member.role === "admin" && (
+                        <button
+                          type="button"
+                          onClick={() => manageMember(member.email, "demote")}
+                          className="rounded-lg border border-[var(--color-border)] px-2 py-1 text-[11px] font-semibold text-[var(--color-text-secondary)]"
+                        >
+                          Remove admin
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => manageMember(member.email, isMuted ? "unmute" : "mute")}
+                        className="rounded-lg border border-[var(--color-border)] px-2 py-1 text-[11px] font-semibold text-[var(--color-text-secondary)]"
+                      >
+                        {isMuted ? "Unmute" : "Mute 15m"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => manageMember(member.email, "kick")}
+                        className="rounded-lg border border-red-200 px-2 py-1 text-[11px] font-semibold text-red-600"
+                      >
+                        Kick
+                      </button>
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
 
       {searchOpen && (
         <div className="shrink-0 border-b border-[var(--color-border)] bg-white/80 px-3 py-2 sm:px-4">
@@ -520,7 +704,7 @@ export function ChatEditor({
                     className="flex w-full flex-col items-start gap-0.5 border-b border-[var(--color-border)] px-3 py-2 text-left last:border-0 hover:bg-violet-50"
                   >
                     <span className="text-[11px] font-medium text-violet-700">
-                      {(m.email || "").split("@")[0]}
+                      {m.displayName || (m.email || "").split("@")[0]}
                     </span>
                     <span className="line-clamp-2 text-xs text-[var(--color-text)]">
                       {m.message}
@@ -607,6 +791,8 @@ export function ChatEditor({
               const showHeader = !isMe && first;
               const isDeleted = msg.deleted === true;
               const isEditing = editingId === msg.id;
+              const readCount = msg.readBy?.length || 0;
+              const deliveredCount = msg.deliveredTo?.length || 0;
 
               return (
                 <div
@@ -624,7 +810,7 @@ export function ChatEditor({
                     {!isMe && (
                       <div className="w-8 shrink-0">
                         {showHeader ? (
-                          <Avatar name={msg.email} size="sm" />
+                          <Avatar name={msg.displayName || msg.email} size="sm" />
                         ) : (
                           <div className="h-7 w-7" />
                         )}
@@ -634,7 +820,7 @@ export function ChatEditor({
                     <div className="min-w-0">
                       {showHeader && (
                         <span className="mb-1 block px-1 text-xs font-semibold capitalize text-[var(--color-primary)]">
-                          {msg.email?.split("@")[0]}
+                          {msg.displayName || msg.email?.split("@")[0]}
                         </span>
                       )}
 
@@ -698,6 +884,15 @@ export function ChatEditor({
                           }`}
                         >
                           {msg.edited && !isDeleted ? <span>edited</span> : null}
+                          {isMe && !isDeleted && (
+                            <span>
+                              {readCount > 0
+                                ? `Read by ${readCount}`
+                                : deliveredCount > 0
+                                  ? "Delivered"
+                                  : "Sent"}
+                            </span>
+                          )}
                           {msg.timestamp && (
                             <span>
                               {new Date(msg.timestamp).toLocaleTimeString([], {

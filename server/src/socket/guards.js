@@ -16,13 +16,16 @@ function isValidMessageId(messageId) {
 }
 
 function isRoomMember(db, roomId, email) {
+  return getRoomMember(db, roomId, email).then((snapshot) => snapshot.exists);
+}
+
+function getRoomMember(db, roomId, email) {
   return db
     .collection("rooms")
     .doc(roomId)
     .collection("members")
     .doc(email)
-    .get()
-    .then((snapshot) => snapshot.exists);
+    .get();
 }
 
 /**
@@ -86,6 +89,7 @@ module.exports = {
   MAX_MESSAGE_LENGTH,
   BLOCKED_TERMS,
   consumeRateLimit,
+  getRoomMember,
   isRoomMember,
   isValidMessageId,
   isValidRoomId,

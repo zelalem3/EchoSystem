@@ -41,6 +41,7 @@ function createApp({ auth, db, redisClient }) {
       socket.data.user = {
         uid: decodedToken.uid,
         email: decodedToken.email,
+        displayName: decodedToken.name || "",
       };
       next();
     } catch {

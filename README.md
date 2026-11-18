@@ -28,6 +28,10 @@ Users can create or join rooms, see who is online, watch typing indicators in re
 - 🔍 **In-room search** — Search recent messages inside a room.
 - 📋 **Room metadata** — Description, creator, and last activity.
 - 🔁 **Reconnect UX** — Connection badge shows Connected / Reconnecting / Disconnected.
+- 🌐 **Public and private rooms** — Public rooms can be joined by name; private rooms require a generated invite code or shareable invite link.
+- 👥 **Room roles and moderation** — Room owners can appoint admins; owners and admins can mute members for 15 minutes or remove them.
+- 👤 **User profiles** — Sign-up collects a display name and optional bio, with an editable profile page.
+- ✓ **Delivery and read receipts** — Messages show sent, delivered, or read status.
 
 ---
 
@@ -55,20 +59,26 @@ EchoSystem uses a Firestore subcollection structure to maintain relationships be
 ```text
 users/
 └── {userEmail}/
+    ├── displayName, bio
     └── joined_rooms/
         └── {roomId}/
 
 rooms/
 └── {roomId}/
+    ├── visibility, inviteCode
     ├── messages/
-    │   └── {messageId}/
+    │   └── {messageId}/ (deliveredTo, readBy)
     └── members/
-        └── {memberId}/
+        └── {memberId}/ (role, mutedUntil)
 ```
 
 ### Key Flows
 
 - **Joining a room:** When a user joins a room, the application records the membership in `rooms/{roomId}/members` and adds the room to `users/{userEmail}/joined_rooms`.
+- **Room access:** New rooms are public by default. Choose private to generate an invite code; private-room links contain the room name and code. Older rooms without a visibility field retain private-room access rules.
+- **Moderation:** Each room member has an owner, admin, or member role. The server verifies role permissions and enforces active mutes before accepting messages.
+- **Profiles:** Registration saves the display name to Firebase Authentication and the display name/bio to the user's Firestore profile. Profiles can be edited from the Profile button.
+- **Message receipts:** Connected clients record delivery when a message arrives and record reads when it is loaded in the open room. Receipts are stored on each message.
 - **Authentication:** After login, the application retrieves the user's joined rooms and populates the sidebar.
 - **Message delivery:** Messages are persisted in Firestore and broadcast to connected clients through Socket.IO.
 - **Chat history:** When a user joins a room, the application loads previously stored messages.

@@ -1,5 +1,6 @@
 const {
   consumeRateLimit,
+  getRoomMember,
   isRoomMember,
   isValidMessageId,
   isValidRoomId,
@@ -33,8 +34,14 @@ function registerChatHandlers(socket, io, { db, messages }) {
 
     try {
       const user = socket.data.user;
-      if (!(await isRoomMember(db, roomId, user.email))) {
+      const memberSnapshot = await getRoomMember(db, roomId, user.email);
+      if (!memberSnapshot.exists) {
         respond({ ok: false, error: "You do not have access to this room." });
+        return;
+      }
+      const mutedUntil = memberSnapshot.data()?.mutedUntil;
+      if (mutedUntil && Date.parse(mutedUntil) > Date.now()) {
+        respond({ ok: false, error: "You are muted in this room." });
         return;
       }
 
@@ -42,10 +49,13 @@ function registerChatHandlers(socket, io, { db, messages }) {
       const messageData = {
         email: user.email,
         uid: user.uid,
+        displayName: user.displayName || "",
         message: moderation.text,
         timestamp: now,
         deleted: false,
         edited: false,
+        deliveredTo: [],
+        readBy: [],
       };
 
       const savedMessage = await db
@@ -222,6 +232,37 @@ function registerChatHandlers(socket, io, { db, messages }) {
       respond({ ok: false, error: "Unable to search messages." });
     }
   });
+
+  for (const status of ["deliveredTo", "readBy"]) {
+    socket.on(status === "readBy" ? "markMessagesRead" : "markMessagesDelivered", async (payload = {}) => {
+      const { roomId, messageIds } = payload || {};
+      if (
+        !isValidRoomId(roomId) ||
+        !Array.isArray(messageIds) ||
+        messageIds.length > 100 ||
+        !socket.rooms.has(roomId) ||
+        !consumeRateLimit(socket, `receipt:${status}`, 60, 10_000)
+      ) {
+        return;
+      }
+
+      try {
+        const user = socket.data.user;
+        if (!(await isRoomMember(db, roomId, user.email))) return;
+        const ids = [...new Set(messageIds.filter(isValidMessageId))];
+        const receipts = await Promise.all(
+          ids.map((messageId) =>
+            messages.addMessageReceipt(roomId, messageId, user.email, status)
+          )
+        );
+        for (const result of receipts) {
+          if (result.ok) io.to(roomId).emit("messageStatusUpdate", result.receipt);
+        }
+      } catch (err) {
+        console.error("Message Receipt Error:", err);
+      }
+    });
+  }
 }
 
 module.exports = { registerChatHandlers };

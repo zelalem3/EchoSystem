@@ -1,5 +1,11 @@
+const { randomBytes } = require("node:crypto");
 const { MESSAGE_PAGE_SIZE } = require("../services/messageService");
-const { consumeRateLimit, isRoomMember, isValidRoomId } = require("./guards");
+const {
+  consumeRateLimit,
+  getRoomMember,
+  isRoomMember,
+  isValidRoomId,
+} = require("./guards");
 
 const PRESENCE_HEARTBEAT_MS = 20_000;
 
@@ -12,8 +18,31 @@ function registerRoomHandlers(socket, io, { db, messages, presence }) {
     ).catch((err) => console.error("Presence Heartbeat Error:", err));
   }, PRESENCE_HEARTBEAT_MS);
 
+  async function emitRoomMembers(roomId) {
+    const snapshot = await db
+      .collection("rooms")
+      .doc(roomId)
+      .collection("members")
+      .limit(100)
+      .get();
+    io.to(roomId).emit(
+      "roomMembersUpdate",
+      snapshot.docs.map((doc) => {
+        const member = doc.data();
+        return {
+          email: doc.id,
+          ...member,
+          mutedUntil:
+            member.mutedUntil && Date.parse(member.mutedUntil) <= Date.now()
+              ? null
+              : member.mutedUntil || null,
+        };
+      })
+    );
+  }
+
   socket.on("joinRoom", async (payload = {}) => {
-    const { roomId, description } = payload || {};
+    const { roomId, description, visibility, inviteCode } = payload || {};
     if (!isValidRoomId(roomId)) {
       socket.emit("roomError", { roomId, message: "Invalid room name." });
       return;
@@ -36,14 +65,17 @@ function registerRoomHandlers(socket, io, { db, messages, presence }) {
         .collection("joined_rooms")
         .doc(roomId);
       const joinedAt = new Date().toISOString();
-
+      const safeDescription =
+        typeof description === "string" ? description.trim().slice(0, 280) : "";
       let roomMeta = null;
 
       const authorized = await db.runTransaction(async (transaction) => {
-        const memberSnapshot = await transaction.get(memberRef);
-        if (memberSnapshot.exists) {
-          const roomSnap = await transaction.get(roomRef);
-          roomMeta = roomSnap.exists ? roomSnap.data() : null;
+        const [memberSnapshot, roomSnapshot] = await Promise.all([
+          transaction.get(memberRef),
+          transaction.get(roomRef),
+        ]);
+        if (memberSnapshot.exists && roomSnapshot.exists) {
+          roomMeta = roomSnapshot.data();
           transaction.set(
             userRoomRef,
             { roomId, lastAccessed: joinedAt },
@@ -52,27 +84,54 @@ function registerRoomHandlers(socket, io, { db, messages, presence }) {
           return true;
         }
 
-        const [roomSnapshot, membersSnapshot] = await Promise.all([
-          transaction.get(roomRef),
-          transaction.get(roomRef.collection("members").limit(1)),
-        ]);
-        if (roomSnapshot.exists || !membersSnapshot.empty) return false;
+        if (roomSnapshot.exists) {
+          roomMeta = roomSnapshot.data();
+          const roomVisibility = roomMeta.visibility || "private";
+          if (
+            roomVisibility !== "public" &&
+            (typeof inviteCode !== "string" ||
+              inviteCode !== roomMeta.inviteCode)
+          ) {
+            return false;
+          }
 
-        const safeDescription =
-          typeof description === "string"
-            ? description.trim().slice(0, 280)
-            : "";
+          transaction.create(memberRef, {
+            email: user.email,
+            uid: user.uid,
+            displayName: user.displayName || "",
+            joinedAt,
+            role: "member",
+          });
+          transaction.set(userRoomRef, { roomId, lastAccessed: joinedAt });
+          return true;
+        }
 
+        const membersSnapshot = await transaction.get(
+          roomRef.collection("members").limit(1)
+        );
+        if (!membersSnapshot.empty) return false;
+
+        const roomVisibility = visibility === "private" ? "private" : "public";
         roomMeta = {
           createdBy: user.uid,
           createdByEmail: user.email,
           createdAt: joinedAt,
           lastActivity: joinedAt,
           description: safeDescription,
+          visibility: roomVisibility,
+          ...(roomVisibility === "private"
+            ? { inviteCode: randomBytes(9).toString("base64url") }
+            : {}),
         };
 
         transaction.create(roomRef, roomMeta);
-        transaction.set(memberRef, { email: user.email, joinedAt, role: "owner" });
+        transaction.set(memberRef, {
+          email: user.email,
+          uid: user.uid,
+          displayName: user.displayName || "",
+          joinedAt,
+          role: "owner",
+        });
         transaction.set(userRoomRef, { roomId, lastAccessed: joinedAt });
         return true;
       });
@@ -80,7 +139,7 @@ function registerRoomHandlers(socket, io, { db, messages, presence }) {
       if (!authorized) {
         socket.emit("roomError", {
           roomId,
-          message: "You do not have access to this room.",
+          message: "You do not have access to this room. Check the invite code.",
         });
         return;
       }
@@ -93,6 +152,7 @@ function registerRoomHandlers(socket, io, { db, messages, presence }) {
       );
 
       const page = await messages.getRoomMessages(roomId);
+      const member = (await getRoomMember(db, roomId, user.email)).data();
       socket.emit("chatHistory", { roomId, ...page });
       socket.emit("roomMeta", {
         roomId,
@@ -101,13 +161,139 @@ function registerRoomHandlers(socket, io, { db, messages, presence }) {
         createdAt: roomMeta?.createdAt || null,
         lastActivity: roomMeta?.lastActivity || null,
         description: roomMeta?.description || "",
+        visibility: roomMeta?.visibility || "private",
+        inviteCode:
+          roomMeta?.visibility === "private" ? roomMeta.inviteCode || null : null,
+        role: member?.role || "member",
       });
+      await emitRoomMembers(roomId);
     } catch (err) {
       console.error("Join Room Error:", err);
       socket.emit("roomError", {
         roomId,
         message: "Unable to join the room. Please try again.",
       });
+    }
+  });
+
+  socket.on("manageRoomMember", async (payload = {}, acknowledge) => {
+    const respond = (result) => {
+      if (typeof acknowledge === "function") acknowledge(result);
+    };
+    const { roomId, email: targetEmail, action } = payload || {};
+    if (
+      !isValidRoomId(roomId) ||
+      typeof targetEmail !== "string" ||
+      targetEmail.length > 254 ||
+      !["promote", "demote", "kick", "mute", "unmute"].includes(action)
+    ) {
+      respond({ ok: false, error: "Invalid moderation request." });
+      return;
+    }
+    if (!consumeRateLimit(socket, "manageRoomMember", 10, 60_000)) {
+      respond({ ok: false, error: "Too many moderation requests. Please wait." });
+      return;
+    }
+
+    try {
+      const user = socket.data.user;
+      const roomRef = db.collection("rooms").doc(roomId);
+      const actorRef = roomRef.collection("members").doc(user.email);
+      const targetRef = roomRef.collection("members").doc(targetEmail);
+      let updatedRole = null;
+      let kicked = false;
+
+      const result = await db.runTransaction(async (transaction) => {
+        const [roomSnapshot, actorSnapshot, targetSnapshot] = await Promise.all([
+          transaction.get(roomRef),
+          transaction.get(actorRef),
+          transaction.get(targetRef),
+        ]);
+        if (!roomSnapshot.exists || !actorSnapshot.exists || !targetSnapshot.exists) {
+          return { ok: false, error: "Room member not found." };
+        }
+
+        const actor = actorSnapshot.data();
+        const target = targetSnapshot.data();
+        const owner =
+          actor.role === "owner" || roomSnapshot.data()?.createdBy === user.uid;
+        const admin = owner || actor.role === "admin";
+        const targetIsOwner =
+          target.role === "owner" ||
+          roomSnapshot.data()?.createdBy === target.uid;
+        const targetIsAdmin = target.role === "admin" || targetIsOwner;
+
+        if (!admin) return { ok: false, error: "Only room admins can moderate." };
+        if (targetEmail === user.email || targetIsOwner) {
+          return { ok: false, error: "You cannot moderate this member." };
+        }
+        if (!owner && targetIsAdmin) {
+          return { ok: false, error: "Admins can only moderate members." };
+        }
+        if ((action === "promote" || action === "demote") && !owner) {
+          return { ok: false, error: "Only the owner can change admin roles." };
+        }
+
+        if (action === "promote") {
+          if (target.role === "admin") {
+            return { ok: false, error: "This member is already an admin." };
+          }
+          updatedRole = "admin";
+          transaction.update(targetRef, { role: updatedRole });
+        } else if (action === "demote") {
+          if (target.role !== "admin") {
+            return { ok: false, error: "Only admins can be demoted." };
+          }
+          updatedRole = "member";
+          transaction.update(targetRef, { role: updatedRole });
+        } else if (action === "kick") {
+          kicked = true;
+          transaction.delete(targetRef);
+          transaction.delete(
+            db
+              .collection("users")
+              .doc(targetEmail)
+              .collection("joined_rooms")
+              .doc(roomId)
+          );
+        } else {
+          transaction.update(targetRef, {
+            mutedUntil:
+              action === "mute"
+                ? new Date(Date.now() + 15 * 60_000).toISOString()
+                : null,
+          });
+        }
+        return { ok: true };
+      });
+
+      if (!result.ok) {
+        respond(result);
+        return;
+      }
+
+      if (kicked) {
+        const targetSockets = await io.in(roomId).fetchSockets();
+        const kickedSockets = targetSockets.filter(
+          (targetSocket) => targetSocket.data.user?.email === targetEmail
+        );
+        for (const targetSocket of kickedSockets) {
+          targetSocket.emit("roomKicked", { roomId });
+          await targetSocket.leave(roomId);
+          targetSocket.data.presenceRooms?.delete(roomId);
+          await presence.removeRoomUser(roomId, targetSocket.id);
+        }
+        io.to(roomId).emit(
+          "userCountUpdate",
+          await presence.getRoomUserCount(roomId)
+        );
+      }
+
+      await emitRoomMembers(roomId);
+      respond({ ok: true, role: updatedRole });
+    } catch (err) {
+      console.error("Manage Room Member Error:", err);
+      respond({ ok: false, error: "Unable to update room membership." });
     }
   });
 
@@ -143,7 +329,6 @@ function registerRoomHandlers(socket, io, { db, messages, presence }) {
       const isOwner =
         role === "owner" ||
         (roomSnap.exists && roomSnap.data()?.createdBy === user.uid);
-
       if (!isOwner) {
         respond({ ok: false, error: "Only the room owner can update metadata." });
         return;
@@ -151,11 +336,10 @@ function registerRoomHandlers(socket, io, { db, messages, presence }) {
 
       const safeDescription =
         typeof description === "string" ? description.trim().slice(0, 280) : "";
-
-      await db.collection("rooms").doc(roomId).set(
-        { description: safeDescription },
-        { merge: true }
-      );
+      await db
+        .collection("rooms")
+        .doc(roomId)
+        .set({ description: safeDescription }, { merge: true });
 
       const meta = {
         roomId,
@@ -164,8 +348,12 @@ function registerRoomHandlers(socket, io, { db, messages, presence }) {
         createdByEmail: roomSnap.data()?.createdByEmail || null,
         createdAt: roomSnap.data()?.createdAt || null,
         lastActivity: roomSnap.data()?.lastActivity || null,
+        visibility: roomSnap.data()?.visibility || "private",
+        inviteCode:
+          roomSnap.data()?.visibility === "private"
+            ? roomSnap.data()?.inviteCode || null
+            : null,
       };
-
       io.to(roomId).emit("roomMeta", meta);
       respond({ ok: true, meta });
     } catch (err) {

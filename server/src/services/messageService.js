@@ -147,11 +147,47 @@ function createMessageService(db) {
     });
   }
 
+  async function addMessageReceipt(roomId, messageId, email, status) {
+    if (!["deliveredTo", "readBy"].includes(status)) {
+      return { ok: false, error: "Invalid receipt status." };
+    }
+
+    const ref = db
+      .collection("rooms")
+      .doc(roomId)
+      .collection("messages")
+      .doc(messageId);
+
+    return db.runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      if (!snap.exists) return { ok: false, error: "Message not found." };
+      const data = snap.data();
+      if (data.deleted === true || data.email === email) {
+        return { ok: false, error: "Receipt is not applicable." };
+      }
+
+      const deliveredTo = new Set(
+        Array.isArray(data.deliveredTo) ? data.deliveredTo : []
+      );
+      const readBy = new Set(Array.isArray(data.readBy) ? data.readBy : []);
+      deliveredTo.add(email);
+      if (status === "readBy") readBy.add(email);
+
+      const updated = {
+        deliveredTo: [...deliveredTo],
+        readBy: [...readBy],
+      };
+      tx.update(ref, updated);
+      return { ok: true, receipt: { id: messageId, ...updated } };
+    });
+  }
+
   return {
     getRoomMessages,
     searchRoomMessages,
     softDeleteMessage,
     editMessage,
+    addMessageReceipt,
   };
 }
 
